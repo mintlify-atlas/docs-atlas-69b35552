@@ -1,7 +1,7 @@
 ---
 title: "Semantic Search Engines and Embedding Configuration"
 sidebarTitle: "Semantic Search"
-description: "Enable vector-based natural language symbol search in KiroGraph using one of 9 engines — from zero-dependency cosine similarity to SIMD-accelerated TurboVec in Rust."
+description: "Add natural language search to KiroGraph with one of nine engines: cosine, TurboQuant, TurboVec, sqlite-vec, Orama, PGlite, LanceDB, Qdrant, or Typesense."
 ---
 
 By default, KiroGraph resolves symbols using exact name lookup and full-text search. Enabling embeddings adds a third search mode: natural language queries. When you ask `kirograph_search` for "functions that handle authentication", it embeds the query text, computes similarity against all indexed symbols, and returns the closest matches — even if none of them contain the word "authentication" in their name.

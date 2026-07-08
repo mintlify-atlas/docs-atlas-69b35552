@@ -1,7 +1,7 @@
 ---
-title: "KiroGraph: Semantic Code Intelligence for AI Agents"
+title: "KiroGraph: Semantic Code Knowledge Graph for Kiro IDE"
 sidebarTitle: "Introduction"
-description: "KiroGraph builds a local SQLite knowledge graph from your codebase so AI agents like Kiro can look up symbols, trace call graphs, and assess impact in a single MCP tool call."
+description: "KiroGraph builds a local SQLite knowledge graph from your codebase so Kiro and other AI agents can look up symbols and trace call graphs in one tool call."
 ---
 
 KiroGraph is a semantic code knowledge graph for [Kiro IDE](https://kiro.dev) — and a growing family of other MCP-capable AI tools. It parses your source code using tree-sitter, extracts every symbol and relationship, and stores the result in a local SQLite database. When Kiro needs to understand your codebase, it queries that graph in a single tool call instead of reading dozens of files one by one.
@@ -27,7 +27,7 @@ The graph is pre-indexed, always up to date, and **100% local**.
 
 KiroGraph is built around a core graph layer that is always active, with opt-in modules you enable as your project needs grow.
 
-```
+```text
 ┌─────────────────────────────────────────┐
 │                  Kiro                   │
 │                                         │

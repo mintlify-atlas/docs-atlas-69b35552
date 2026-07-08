@@ -1,7 +1,7 @@
 ---
-title: "LLM Wiki: Compounding Knowledge Across Sessions"
+title: "LLM Wiki: Compounding Codebase Knowledge Over Time"
 sidebarTitle: "Wiki"
-description: "KiroGraph-Wiki implements the LLM wiki pattern — markdown pages that compound codebase knowledge across sessions with conflict resolution and full-text search."
+description: "KiroGraph-Wiki maintains markdown pages that compound codebase knowledge across sessions with full-text search and conflict resolution built in."
 ---
 
 KiroGraph-Wiki implements the [LLM wiki pattern](https://x.com/karpathy/status/1866684706716340254) described by Andrej Karpathy. Instead of accumulating facts in an ever-growing log, the wiki maintains a set of markdown pages that are overwritten and refined as new information arrives. Knowledge compounds rather than piles up — each ingest pass makes existing pages more accurate and more complete.
@@ -42,14 +42,14 @@ The wiki follows a three-operation cycle that the agent runs whenever new inform
 
 The LLM writes structured diff blocks following `SCHEMA.md`. The format is explicit and machine-parseable:
 
-```
+```text
 WIKI_DIFF_START
 {"action":"upsert","page":"AuthService","section":"Decisions","mode":"append"}
 - 2025-06-15 — Switched from JWT expiry checks to Redis session store for revocability
 WIKI_DIFF_END
 ```
 
-```
+```text
 WIKI_DIFF_START
 {"action":"create","page":"RateLimiter","title":"Rate Limiter"}
 ## Summary

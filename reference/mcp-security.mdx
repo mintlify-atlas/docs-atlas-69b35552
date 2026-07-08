@@ -1,7 +1,7 @@
 ---
-title: "Security MCP Tools Reference"
+title: "KiroGraph Security MCP Tools: CVE Scanning and SBOM Export"
 sidebarTitle: "Security Tools"
-description: "Reference for KiroGraph's 15 security MCP tools: vulnerability scanning, reachability analysis, attack surface mapping, secret detection, SAST, SBOM, and SARIF export."
+description: "Reference for KiroGraph's 15 security tools: CVE reachability analysis, attack surface mapping, secrets detection, SAST flow analysis, and SBOM export."
 ---
 
 KiroGraph's security tools turn the code knowledge graph into a reachability-aware vulnerability scanner. Rather than reporting every CVE that appears in your `package.json`, they trace actual call paths from HTTP routes and exported entry points to vulnerable dependencies — surfacing only the vulnerabilities your code can actually reach. All tools in this group require `enableSecurity: true` **and** `enableArchitecture: true` in your config. Pattern-based SAST tools additionally require `enablePatterns: true`.
@@ -197,28 +197,6 @@ List dependency licenses and check them against the configured `securityLicenseP
 
 ---
 
-### `kirograph_manifest`
-
-Parse and display all manifest dependencies (package.json, Cargo.toml, go.mod, requirements.txt, etc.) across the workspace. Supports multi-ecosystem monorepos.
-
-<ParamField body="package" type="string">
-  Package name or path for a focused view (partial match accepted).
-</ParamField>
-
-<ParamField body="ecosystem" type="string">
-  Filter by ecosystem (e.g. `"npm"`, `"cargo"`, `"go"`, `"python"`).
-</ParamField>
-
-<ParamField body="showDrift" type="boolean" default="false">
-  Highlight packages declared in multiple manifests with different versions.
-</ParamField>
-
-<ParamField body="projectPath" type="string" default="cwd">
-  Project root path.
-</ParamField>
-
----
-
 ### `kirograph_supply_chain`
 
 Supply chain health assessment: OpenSSF Scorecard scores, maintainer counts, abandoned package detection (&gt;365 days inactive), and new package risk (&lt;30 days old). Uses external APIs — results are cached to avoid repeated requests.
@@ -272,7 +250,7 @@ Map all HTTP routes to reachable vulnerable dependencies. Each result shows the 
 SAST-lite: detect insecure data flows in your code. Identifies SQL injection, dangerous `eval`/`exec`, unsafe deserialization, path traversal, and weak cryptographic usage. Each finding is tagged with an OWASP Top 10 (2021) category.
 
 <ParamField body="type" type="string" default="all">
-  Filter by flow type. Options: `sql`, `eval`, `deserialization`, `path-traversal`, `crypto`, `all`.
+  Filter by flow type. Options: `sql`, `eval`, `deserialize`, `path`, `crypto`, `all`.
 </ParamField>
 
 <ParamField body="projectPath" type="string" default="cwd">
@@ -373,31 +351,4 @@ Diff current pattern matches against a saved baseline. Returns newly introduced 
 }
 ```
 
----
 
-### `kirograph_live_search`
-
-Run a live AST structural pattern search across the indexed codebase using `@ast-grep/napi`. Finds code patterns that cannot be expressed as symbol names or semantic queries — for example, all `eval($X)` calls regardless of context.
-
-<ParamField body="pattern" type="string" required>
-  `ast-grep` inline pattern (e.g. `"eval($X)"`, `"console.log($ARGS)"`).
-</ParamField>
-
-<ParamField body="language" type="string" required>
-  Language to search. Options: `javascript`, `typescript`, `python`, `go`, `rust`, `java`, and others supported by `ast-grep`.
-</ParamField>
-
-<ParamField body="limit" type="number" default="20">
-  Maximum results to return (max 100).
-</ParamField>
-
-<ParamField body="projectPath" type="string" default="cwd">
-  Project root path.
-</ParamField>
-
-<Warning>
-  `kirograph_live_search` is a dynamic tool — it is NOT included in the static
-  `KIROGRAPH_TOOL_NAMES` list and therefore NOT added to the Kiro
-  `autoApprove` array automatically. Add it manually if you want auto-approval
-  in Kiro.
-</Warning>

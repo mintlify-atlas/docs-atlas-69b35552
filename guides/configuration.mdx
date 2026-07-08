@@ -1,5 +1,5 @@
 ---
-title: "Configure KiroGraph with .kirograph/config.json"
+title: "KiroGraph Configuration Reference: config.json Fields"
 sidebarTitle: "Configuration"
 description: "Reference for all KiroGraph config fields: indexing, semantic search engines, architecture, security, memory, data, docs, and agent behavior options."
 ---
@@ -27,7 +27,7 @@ The following snippet enables the most commonly used modules:
   "include": [],
   "exclude": ["node_modules/**", "dist/**", "build/**", ".git/**", "*.min.js", ".kirograph/**"],
   "maxFileSize": 1048576,
-  "extractDocstrings": true,
+  "extractDocstrings": false,
   "trackCallSites": false,
   "frameworkHints": [],
   "fuzzyResolutionThreshold": 0.5,
@@ -50,7 +50,7 @@ The following snippet enables the most commonly used modules:
   "enableDocs": true,
   "docsLinkCode": true,
   "cavemanMode": "off",
-  "shellCompressionLevel": "normal",
+  "shellCompressionLevel": "off",
   "minLogLevel": "warn"
 }
 ```
@@ -81,11 +81,11 @@ The following snippet enables the most commonly used modules:
   Skip any file larger than this byte count (default: 1 MB). Useful to skip generated or minified assets.
 </ParamField>
 
-<ParamField body="extractDocstrings" type="boolean" default="true">
+<ParamField body="extractDocstrings" type="boolean" default="false">
   Extract JSDoc comments, Python docstrings, and inline documentation comments for each symbol.
 </ParamField>
 
-<ParamField body="trackCallSites" type="boolean" default="true">
+<ParamField body="trackCallSites" type="boolean" default="false">
   Record line and column numbers for call edges in the graph. Disable to reduce DB size on very large codebases.
 </ParamField>
 
@@ -205,7 +205,7 @@ The following snippet enables the most commonly used modules:
   Blend weight for hybrid memory search (`0` = full-text only, `1` = vector only).
 </ParamField>
 
-<ParamField body="memoryKeepRaw" type="boolean" default="true">
+<ParamField body="memoryKeepRaw" type="boolean" default="false">
   Store the original observation text alongside the compressed version.
 </ParamField>
 
@@ -213,8 +213,8 @@ The following snippet enables the most commonly used modules:
   Maximum stored observations before the oldest are auto-pruned.
 </ParamField>
 
-<ParamField body="memorySessionTimeout" type="number" default="3600000">
-  Session timeout in milliseconds (default: 1 hour). Observations after this window start a new session.
+<ParamField body="memorySessionTimeout" type="number" default="7200">
+  Session inactivity timeout in seconds (default: 2 hours). Observations after this window start a new session.
 </ParamField>
 
 <ParamField body="memoryContextLimit" type="number" default="3">
@@ -273,7 +273,7 @@ The following snippet enables the most commonly used modules:
   Maximum doc sections surfaced in `kirograph_context` (0 = disabled).
 </ParamField>
 
-<ParamField body="docsContextThreshold" type="number" default="0.5">
+<ParamField body="docsContextThreshold" type="number" default="0.3">
   Minimum confidence score for a doc reference to appear in context results.
 </ParamField>
 
@@ -333,11 +333,11 @@ The following snippet enables the most commonly used modules:
   Communication style for agent responses. One of: `off`, `lite`, `full`, `ultra`. Higher levels compress agent output more aggressively.
 </ParamField>
 
-<ParamField body="shellCompressionLevel" type="string" default="normal">
+<ParamField body="shellCompressionLevel" type="string" default="off">
   Shell output compression level. One of: `off`, `normal`, `aggressive`, `ultra`. Controls how `kirograph_exec` compresses command output before returning it.
 </ParamField>
 
-<ParamField body="enableAgentUtils" type="boolean" default="false">
+<ParamField body="enableAgentUtils" type="boolean" default="true">
   Enable agent utility tools: `kirograph_read` (cached file reads with 7 modes), `kirograph_retrieve` (context-compressed retrieval), and `kirograph_budget` (session budget tracking).
 </ParamField>
 

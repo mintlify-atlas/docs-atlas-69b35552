@@ -1,22 +1,26 @@
 ---
-title: "Documentation Module MCP Tools Reference"
+title: "KiroGraph Docs MCP Tools — Section Retrieval Reference"
 sidebarTitle: "Docs Tools"
-description: "Reference for KiroGraph's 5 documentation MCP tools for section-level retrieval from Markdown, MDX, RST, AsciiDoc, and OpenAPI files with 92–97% token savings."
+description: "Reference for KiroGraph's 5 docs MCP tools: section-level retrieval from Markdown, MDX, RST, AsciiDoc, and OpenAPI files with up to 97% token savings."
 ---
 
 KiroGraph's docs module indexes your project's written documentation alongside the code graph, making it queryable at section granularity. Instead of loading entire files, the agent retrieves only the sections it needs — achieving **92–97% token savings** on typical doc-heavy codebases. All tools require `enableDocs: true` in `.kirograph/config.json` and a completed `kirograph index` run.
 
 <Info>
-  Supported formats: Markdown (`.md`), MDX (`.mdx`), reStructuredText (`.rst`), AsciiDoc (`.adoc`), and OpenAPI specs (`.yaml`/`.json`). Sections are split at heading boundaries and addressed by stable byte-offset-derived IDs.
+  Supported formats: Markdown (`.md`), MDX (`.mdx`), reStructuredText (`.rst`), AsciiDoc (`.adoc`), and OpenAPI specs (`.yaml`/`.json`). Sections are split at heading boundaries and addressed by stable heading-path IDs.
 </Info>
 
 ---
 
 ## Stable Section IDs
 
-Every indexed section receives a **stable ID** — a deterministic string derived from the file path and the byte offset of the heading in the source file. Because the ID is based on the raw file position rather than the heading text, it survives reformatting and minor edits to the heading wording.
+Every indexed section receives a **stable ID** — a deterministic string derived from the file path and the full ancestor heading chain. Because the ID encodes the structural position rather than a byte offset, it survives file reformatting and minor edits elsewhere in the file as long as the heading text and hierarchy don't change.
 
-The ID format is: `<sha8-of-filepath>:<byte-offset-hex>`, for example `a3f1c820:00001a40`.
+The ID format is: `{file-path}::{ancestor-slug/.../heading-slug}#{level}`, for example `docs/auth.md::authentication/jwt-strategy#2`.
+
+- **`file-path`** — project-relative path to the doc file.
+- **`ancestor-slug/.../heading-slug`** — `/`-joined slugified titles of all ancestor headings down to the section itself (GitHub-style slugification: lowercase, spaces→hyphens, special chars removed).
+- **`level`** — heading level (1–6).
 
 Stable IDs are returned by `kirograph_docs_toc`, `kirograph_docs_search`, and `kirograph_docs_outline`. Pass them directly to `kirograph_docs_section` to retrieve the full section content without re-running a search query.
 
@@ -59,13 +63,13 @@ Get the table of contents for the entire project or a specific file. Each entry 
 
 ```text title="Example output (flat)"
 ## Authentication [docs/auth.md]
-  ID: a3f1c820:00001a40
+  ID: docs/auth.md::authentication#2
 
 ### JWT Strategy [docs/auth.md]
-  ID: a3f1c820:00002b80
+  ID: docs/auth.md::authentication/jwt-strategy#3
 
 ### Session Cookies [docs/auth.md]
-  ID: a3f1c820:00003c10
+  ID: docs/auth.md::authentication/session-cookies#3
 ```
 
 ---
@@ -103,11 +107,11 @@ Search documentation sections by a natural-language query or keyword. Uses full-
 ```text title="Example output"
 1. Rate Limiting [docs/api/limits.md]
    Configure per-endpoint rate limits using the sliding window algorithm.
-   ID: b7e2d140:00004f20
+   ID: docs/api/limits.md::rate-limiting#2
 
 2. Global Rate Limit Middleware [docs/api/middleware.md]
    Apply a global limit before route handlers with applyRateLimit().
-   ID: c1a9e380:000081a0
+   ID: docs/api/middleware.md::global-rate-limit-middleware#2
 ```
 
 ---
@@ -132,7 +136,7 @@ Retrieve the full content of a documentation section by its stable ID. This is t
 {
   "tool": "kirograph_docs_section",
   "arguments": {
-    "id": "b7e2d140:00004f20",
+    "id": "docs/api/limits.md::rate-limiting#2",
     "context": true
   }
 }
@@ -151,8 +155,8 @@ router.get('/search', { rateLimit: { max: 30, window: '1m' } }, handler)
 ```
 
 ## Child sections:
-  - Configuring Headers — return `X-RateLimit-*` headers (ID: b7e2d140:00006200)
-  - Per-user vs Global limits (ID: b7e2d140:000078c0)
+  - Configuring Headers — return `X-RateLimit-*` headers (ID: docs/api/limits.md::rate-limiting/configuring-headers#3)
+  - Per-user vs Global limits (ID: docs/api/limits.md::rate-limiting/per-user-vs-global-limits#3)
 ```
 
 ---
@@ -213,7 +217,7 @@ Bidirectional cross-reference lookup. Given a **section ID**, returns the code s
 ```json title="Code symbols referenced by a section"
 {
   "tool": "kirograph_docs_refs",
-  "arguments": { "sectionId": "b7e2d140:00004f20" }
+  "arguments": { "sectionId": "docs/api/limits.md::rate-limiting#2" }
 }
 ```
 
@@ -248,7 +252,7 @@ The typical three-step workflow uses only the content you need, never loading fu
     }
     ```
 
-    Note the section IDs from the results (e.g. `a3f1c820:00001a40`).
+    Note the section IDs from the results (e.g. `docs/auth.md::authentication#2`).
   </Step>
 
   <Step title="Fetch only the sections you need">
@@ -257,7 +261,7 @@ The typical three-step workflow uses only the content you need, never loading fu
     ```json
     {
       "tool": "kirograph_docs_section",
-      "arguments": { "id": "a3f1c820:00001a40", "context": true }
+      "arguments": { "id": "docs/auth.md::authentication#2", "context": true }
     }
     ```
 
@@ -270,7 +274,7 @@ The typical three-step workflow uses only the content you need, never loading fu
     ```json
     {
       "tool": "kirograph_docs_refs",
-      "arguments": { "sectionId": "a3f1c820:00001a40" }
+      "arguments": { "sectionId": "docs/auth.md::authentication#2" }
     }
     ```
 

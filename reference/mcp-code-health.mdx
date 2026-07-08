@@ -1,5 +1,5 @@
 ---
-title: "Code Health MCP Tools Reference"
+title: "KiroGraph Code Health MCP Tools: Dead Code to Complexity"
 sidebarTitle: "Code Health"
 description: "Reference for KiroGraph's code health tools: dead code detection, circular dependencies, hotspots, type hierarchies, snapshots, and complexity analysis."
 ---
@@ -127,21 +127,31 @@ List all saved graph snapshots with their labels, timestamps, symbol counts, and
 
 ---
 
-### `kirograph_communities`
+### `kirograph_path`
 
-Detect clusters of tightly related symbols using a graph community-detection algorithm. Returns community IDs, member counts, and the symbols in each community — useful for identifying emergent module boundaries.
+Find the shortest dependency path between two symbols in the graph. Useful for understanding how two distant parts of the codebase are connected.
 
-<ParamField body="resolution" type="number">
-  Granularity from 0.1 to 2.0. Higher values produce more, smaller communities.
+<ParamField body="from" type="string" required>
+  Source symbol name.
 </ParamField>
 
-<ParamField body="limit" type="number">
-  Maximum communities to return (default 15).
+<ParamField body="to" type="string" required>
+  Target symbol name.
 </ParamField>
 
 <ParamField body="projectPath" type="string" default="cwd">
   Project root path.
 </ParamField>
+
+```json
+{
+  "tool": "kirograph_path",
+  "arguments": {
+    "from": "HttpController.handleRequest",
+    "to": "DatabasePool.query"
+  }
+}
+```
 
 ---
 

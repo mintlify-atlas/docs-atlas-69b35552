@@ -1,7 +1,7 @@
 ---
-title: "Memory MCP Tools Reference"
+title: "KiroGraph Memory MCP Tools — Observations and Conflicts"
 sidebarTitle: "Memory Tools"
-description: "Reference for KiroGraph's 16 memory tools: store decisions, search observations, manage conflicts, review stale facts, and trigger Watchmen workspace synthesis."
+description: "Reference for KiroGraph's 16 memory MCP tools: store and search observations, manage conflicts, schedule reviews, and synthesize workspace briefs."
 ---
 
 KiroGraph's memory subsystem gives AI agents a persistent, queryable store of project observations — decisions made, errors encountered, architectural patterns discovered, and session summaries produced. Unlike conversation history, memory survives across sessions and is stored in the same SQLite database as the code graph, enabling symbol-linked retrieval. All tools in this group require `enableMemory: true`. Watchmen synthesis tools additionally require `enableWatchmen: true`.
@@ -41,26 +41,19 @@ Store an observation in project memory. Duplicate content is silently ignored �
   Project root path.
 </ParamField>
 
-**Normal response:**
+**Response:**
 
-```json
-{ "id": "obs_abc123" }
+Returns a plain text string confirming the stored observation ID and kind:
+
+```
+Stored observation obs_abc123 [decision]
 ```
 
-**Watchmen response** (when `enableWatchmen: true` and the synthesis threshold is met):
+Returns `"Observation already exists (duplicate content)."` if the same text was stored before.
 
-When enough observations have accumulated since the last `kind: 'summary'`, the response includes additional fields:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | The observation ID as usual |
-| `watchmenReady` | `true` | Present only when synthesis should run |
-| `pendingCount` | number | Observations since last `kind: 'summary'` |
-| `message` | string | Synthesis instructions for the agent |
-| `targetFiles` | string[] | Project-relative paths to write the workspace brief to |
-| `skillTargetDir` | string? | Present only when Kiro is detected (`.kiro/` exists). Path for individual `watchmen-<slug>.md` skill files. |
-
-On receiving `watchmenReady: true`, the agent should: (1) call `kirograph_mem_search` for each kind, (2) write the workspace brief to each file in `targetFiles`, (3) if `skillTargetDir` is present write separate skill files for recurring procedures, otherwise embed a `## Recurring Procedures` section in the brief, (4) store a `kind: 'summary'` observation to reset the counter.
+<Note>
+  When `enableWatchmen: true` and the observation count since the last `kind: 'summary'` crosses the configured threshold, the Watchmen hook (installed as a Kiro `agentStop` hook) calls `kirograph_watchmen_status` and `kirograph_watchmen_synthesize` to produce a workspace brief automatically. The `kirograph_mem_store` MCP tool itself always returns a plain string — Watchmen orchestration runs separately.
+</Note>
 
 ---
 

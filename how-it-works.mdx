@@ -1,14 +1,14 @@
 ---
-title: "How KiroGraph Indexes and Queries Your Codebase"
+title: "How KiroGraph Indexes, Stores, and Queries Your Code"
 sidebarTitle: "How It Works"
-description: "KiroGraph uses tree-sitter AST parsing to build a SQLite knowledge graph from your source code, then exposes it via MCP tools for instant symbol lookups and graph traversal."
+description: "Learn how KiroGraph uses tree-sitter AST parsing to build a SQLite knowledge graph, then exposes symbols and edges via MCP tools for instant querying."
 ---
 
 KiroGraph turns your source code into a queryable graph. Every `kirograph index` or `kirograph sync` run parses your files into abstract syntax trees, extracts the symbols and relationships within them, and stores the result in a local SQLite database. This page explains each layer of that process — from structural parsing through semantic embeddings to how MCP tools consume the graph at query time.
 
 ## Indexing Layers
 
-Indexing is divided into five layers. The structural layer is always active. Every other layer is opt-in and is enabled through a flag in `.kirograph/config.json`.
+Indexing is divided into six layers. The structural layer is always active. Every other layer is opt-in and is enabled through a flag in `.kirograph/config.json`.
 
 ### Structural Indexing (Always On)
 
@@ -27,26 +27,32 @@ Both are written to `kirograph.db`. Nodes include a full-text search index (FTS5
 
 #### Node Kinds
 
+KiroGraph extracts 24 node kinds from parsed ASTs. The full list matches the `NodeKind` type in source:
+
 | Kind | Description |
 |---|---|
+| `file` | Top-level file nodes |
+| `module` | Module declarations (e.g. Elixir `defmodule`, ES module scope) |
+| `class` | Class declarations |
+| `struct` | Struct declarations (Go, Rust, C/C++, Swift, etc.) |
+| `interface` | TypeScript / Java / C# / Go interfaces |
+| `trait` | Rust traits, Scala traits |
+| `protocol` | Swift and Elixir protocols |
 | `function` | Standalone function declarations |
 | `method` | Class and object methods |
-| `class` | Class declarations |
-| `interface` | TypeScript / Java / C# interfaces |
-| `type_alias` | TypeScript `type` declarations |
-| `enum` | Enumeration declarations |
-| `variable` | Module-level variable and constant declarations |
+| `property` | Class property declarations |
+| `field` | Struct fields and class fields |
+| `variable` | Module-level variable declarations |
 | `constant` | Explicitly constant bindings |
+| `enum` | Enumeration declarations |
+| `enum_member` | Individual members of an enum |
+| `type_alias` | TypeScript `type` declarations and similar aliases |
+| `namespace` | Namespace and package declarations |
+| `parameter` | Function and method parameters |
+| `import` | Import statements (module-level) |
+| `export` | Export statements (module-level) |
 | `route` | HTTP route handlers (Express, FastAPI, Rails, etc.) |
 | `component` | React, Vue, Svelte, and similar UI components |
-| `module` | File-level module nodes |
-| `namespace` | Namespace and package declarations |
-| `decorator` | Class and method decorators |
-| `property` | Class property declarations |
-| `constructor` | Class constructor methods |
-| `getter` / `setter` | Accessor methods |
-| `arrow_function` | Arrow function expressions |
-| `lambda` | Lambda expressions (Python, Java, etc.) |
 | `dependency` | Entries detected in manifest files (package.json, etc.) |
 | `vulnerability` | CVEs linked to dependency nodes (Security module) |
 
@@ -54,7 +60,7 @@ Both are written to `kirograph.db`. Nodes include a full-text search index (FTS5
 
 Edges capture the structural relationships between nodes:
 
-`calls` · `imports` · `exports` · `extends` · `implements` · `contains` · `references` · `instantiates` · `overrides` · `decorates` · `type_of` · `returns`
+`calls` · `imports` · `exports` · `extends` · `implements` · `contains` · `references` · `instantiates` · `overrides` · `decorates` · `type_of` · `returns` · `has_vulnerability` · `depends_on` · `declared_in`
 
 Each edge record stores the source node, target node, file location, and an optional call-site list when `trackCallSites: true` is set in your config.
 
@@ -116,6 +122,30 @@ Memory surfaces automatically in `kirograph_context` and `kirograph_impact` resu
 }
 ```
 
+### Watchmen (opt-in: `enableWatchmen: true`)
+
+The Watchmen layer builds on the memory module to automatically synthesize accumulated observations into workspace briefs and skill files. It requires `enableMemory: true`.
+
+After each `kirograph_mem_store` call, KiroGraph counts non-summary observations since the last synthesis. When the count reaches `watchmenThreshold` (default: 5), synthesis runs according to `watchmenSynthesisMode`:
+
+- **`local`** (default) — runs a HuggingFace model on-device via ONNX Runtime (`onnx-community/gemma-4-E4B-it-ONNX`). No API key, no external calls, no background daemon. Requires a one-time ~3–4 GB model download. Inference takes 8–15 s on Apple Silicon M1+ and 30–60 s on Intel CPU.
+- **`agent`** — delegates synthesis to the active Kiro agent via an `askAgent` hook. Higher output quality but consumes API tokens and requires Kiro IDE.
+
+Synthesis writes a workspace brief to the tool's project memory file (`.kiro/steering/kirograph-watchmen.md` for Kiro) and optionally individual `inclusion: manual` skill files for recurring procedures.
+
+```json
+{
+  "enableMemory": true,
+  "enableWatchmen": true,
+  "watchmenThreshold": 5,
+  "watchmenSynthesisMode": "local"
+}
+```
+
+<Note>
+  Watchmen is experimental. Output quality in local mode varies significantly depending on the model and hardware. Use `watchmenSynthesisMode: "agent"` on Kiro for best results.
+</Note>
+
 ### Documentation Indexing (opt-in: `enableDocs: true`)
 
 The docs layer indexes project documentation by heading hierarchy. Instead of reading entire files, the agent retrieves exactly the section it needs via a stable section ID. Nine format parsers are supported: Markdown, MDX, reStructuredText, AsciiDoc, RDoc, Org-mode, HTML, plain text, and OpenAPI/Swagger. Code↔docs cross-references are resolved automatically using backtick references, CamelCase identifiers, and snake_case patterns found in doc text.
@@ -142,21 +172,21 @@ Token savings: 95–99% compared to reading raw data files.
 
 ## The Graph Model
 
-Every symbol stored in KiroGraph has the following fields:
+Every symbol stored in KiroGraph has the following fields (column names as they appear in `kirograph.db`):
 
 | Field | Description |
 |---|---|
-| `id` | Stable internal integer ID |
+| `id` | Stable TEXT identifier (UUID) |
 | `name` | Short symbol name (e.g. `authenticate`) |
 | `qualified_name` | Fully-qualified name including module path |
-| `file` | Repo-relative file path |
-| `line` / `end_line` | Source location |
-| `kind` | One of the 26 node kinds listed above |
+| `file_path` | Repo-relative file path |
+| `start_line` / `end_line` | Source location (1-indexed) |
+| `kind` | One of the 24 node kinds listed above |
 | `signature` | Function signature or type declaration text |
 | `docstring` | Extracted doc comment (when `extractDocstrings: true`) |
-| `embedding` | Float32 vector (when `enableEmbeddings: true`) |
+| `embedding` | Float32 vector stored in the `vectors` table (when `enableEmbeddings: true`) |
 
-Edges are stored with `source_id`, `target_id`, `kind`, `file`, and `line`. When `trackCallSites: true` is enabled, each `calls` edge also stores the exact call-site line numbers as a JSON array.
+Edges are stored with `source`, `target`, `kind`, `line`, and `column`. When `trackCallSites: true` is enabled, each `calls` edge also stores the exact call-site line numbers as a JSON array in the `metadata` column.
 
 ## Incremental Sync
 

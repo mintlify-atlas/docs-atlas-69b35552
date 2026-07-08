@@ -1,14 +1,16 @@
 ---
-title: "Core and Navigation MCP Tools Reference"
+title: "KiroGraph Core, Navigation, and Utility MCP Tools Guide"
 sidebarTitle: "Core Tools"
-description: "Reference for KiroGraph's always-on core tools (kirograph_context, kirograph_exec, kirograph_gain) and navigation tools for symbol search, graph traversal, and file listing."
+description: "Reference for KiroGraph's always-on core tools and optional navigation, call-graph traversal, agent utility, shell execution, and compression tools."
 ---
 
-KiroGraph's core tools are registered unconditionally — they appear in every `tools/list` response regardless of which feature flags are enabled. They cover the most frequent agent workflows: building task context, searching for symbols, tracing call chains, inspecting symbol details, and understanding impact before making changes. Navigation tools (`kirograph_search`, `kirograph_callers`, `kirograph_callees`) require `enableNavigation: true` and `trackCallSites: true` respectively, while status and file tools are bundled with the navigation flag.
+KiroGraph's core tools are registered unconditionally — they appear in every `tools/list` response regardless of which feature flags are enabled. The always-on core set covers the most frequent agent workflows: building task context, searching for symbols, and inspecting symbol details. Navigation tools (`kirograph_status`, `kirograph_files`, `kirograph_impact`) require `enableNavigation: true`. Call-graph traversal tools (`kirograph_callers`, `kirograph_callees`) require `trackCallSites: true`. Agent utility tools (`kirograph_read`, `kirograph_retrieve`, `kirograph_gain`, `kirograph_budget`) require `enableAgentUtils: true`.
 
 ---
 
 ## Core Tools (always-on)
+
+The three always-on tools — `kirograph_context`, `kirograph_search`, and `kirograph_node` — are registered unconditionally and appear in every `tools/list` response.
 
 ### `kirograph_context`
 
@@ -65,66 +67,6 @@ This is the only tool that invokes the vector engine on every call. For most tas
 
 ---
 
-### `kirograph_exec`
-
-Run a shell command with token-optimized, noise-filtered output. Automatically applies structural filters for git, test runners (Jest, Vitest, pytest), linters (ESLint, Pylint), build tools (webpack, tsc), and Docker — stripping repeated noise lines and compacting progress bars before the output reaches the model.
-
-<ParamField body="command" type="string" required>
-  Shell command to execute.
-</ParamField>
-
-<ParamField body="cwd" type="string" default="project root">
-  Working directory for the command.
-</ParamField>
-
-<ParamField body="level" type="string" default="normal">
-  Compression intensity. Options: `normal` (balanced), `aggressive` (more compact), `ultra` (maximum compression — may drop some detail).
-</ParamField>
-
-<ParamField body="timeout" type="number" default="60">
-  Timeout in seconds before the command is killed.
-</ParamField>
-
-<ParamField body="projectPath" type="string" default="cwd">
-  Project root path used for configuration lookup.
-</ParamField>
-
-<Note>
-  `kirograph_exec` requires `enableShellExec: true` in your config. When the flag is `false`, the tool is not registered and `kirograph_compress` can be used instead for manual compression of command output.
-</Note>
-
-```json
-{
-  "tool": "kirograph_exec",
-  "arguments": {
-    "command": "npm test -- --reporter=verbose",
-    "level": "aggressive"
-  }
-}
-```
-
----
-
-### `kirograph_gain`
-
-Show token savings statistics accumulated from compressed command outputs and graph tool calls in the current session (or longer periods).
-
-<ParamField body="period" type="string" default="session">
-  Time window to aggregate. Options: `session` (since server start), `today`, `week`, `all`.
-</ParamField>
-
-<ParamField body="projectPath" type="string" default="cwd">
-  Project root path.
-</ParamField>
-
-<Note>
-  `kirograph_gain` requires `enableAgentUtils: true`. It reads from the same `TokenTracker` store that `kirograph_exec` writes to.
-</Note>
-
----
-
-## Navigation Tools (require `enableNavigation: true`)
-
 ### `kirograph_search`
 
 Quick symbol search by name. Returns file locations and qualified names only — no source code. Ideal for confirming a symbol exists or discovering all symbols that match a partial name before drilling in with `kirograph_node`.
@@ -163,6 +105,30 @@ Quick symbol search by name. Returns file locations and qualified names only —
 ```
 
 ---
+
+### `kirograph_node`
+
+Get details about a specific symbol, with configurable depth — from a quick location summary up to the full source code.
+
+<ParamField body="symbol" type="string" required>
+  Symbol name or fully-qualified name to look up.
+</ParamField>
+
+<ParamField body="qualified" type="boolean" default="false">
+  When `true`, treats `symbol` as a fully-qualified name and performs an exact match, bypassing FTS. Use when you have the `qualifiedName` from a prior result.
+</ParamField>
+
+<ParamField body="detail" type="string" default="summary">
+  Output verbosity. Options: `summary` (name + location + qualified name), `signatures` (adds signature and docstring), `full` (adds complete source code).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Call-Graph Traversal Tools (require `trackCallSites: true`)
 
 ### `kirograph_callers`
 
@@ -214,29 +180,7 @@ Find all functions and methods that a specific symbol calls. Uses BFS traversal 
 
 ---
 
-## Status and File Tools (require `enableNavigation: true`)
-
-### `kirograph_node`
-
-Get details about a specific symbol, with configurable depth — from a quick location summary up to the full source code.
-
-<ParamField body="symbol" type="string" required>
-  Symbol name or fully-qualified name to look up.
-</ParamField>
-
-<ParamField body="qualified" type="boolean" default="false">
-  When `true`, treats `symbol` as a fully-qualified name and performs an exact match, bypassing FTS. Use when you have the `qualifiedName` from a prior result.
-</ParamField>
-
-<ParamField body="detail" type="string" default="summary">
-  Output verbosity. Options: `summary` (name + location + qualified name), `signatures` (adds signature and docstring), `full` (adds complete source code).
-</ParamField>
-
-<ParamField body="projectPath" type="string" default="cwd">
-  Project root path.
-</ParamField>
-
----
+## Navigation Tools (require `enableNavigation: true`)
 
 ### `kirograph_impact`
 
@@ -306,34 +250,6 @@ List the indexed file structure with filtering and multiple output formats. Usef
 
 ---
 
-### `kirograph_path`
-
-Find the shortest dependency path between two symbols in the graph. Useful for understanding how two distant parts of the codebase are connected.
-
-<ParamField body="from" type="string" required>
-  Source symbol name.
-</ParamField>
-
-<ParamField body="to" type="string" required>
-  Target symbol name.
-</ParamField>
-
-<ParamField body="projectPath" type="string" default="cwd">
-  Project root path.
-</ParamField>
-
-```json
-{
-  "tool": "kirograph_path",
-  "arguments": {
-    "from": "HttpController.handleRequest",
-    "to": "DatabasePool.query"
-  }
-}
-```
-
----
-
 ## Agent Utility Tools (require `enableAgentUtils: true`)
 
 ### `kirograph_read`
@@ -391,6 +307,62 @@ Show current session context budget usage: tokens consumed, remaining budget, an
 <ParamField body="projectPath" type="string" default="cwd">
   Project root path.
 </ParamField>
+
+---
+
+### `kirograph_gain`
+
+Show token savings statistics accumulated from compressed command outputs and graph tool calls in the current session (or longer periods).
+
+<ParamField body="period" type="string" default="session">
+  Time window to aggregate. Options: `session` (since server start), `today`, `week`, `all`.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Shell Execution Tool (requires `enableShellExec: true`)
+
+### `kirograph_exec`
+
+Run a shell command with token-optimized, noise-filtered output. Automatically applies structural filters for git, test runners (Jest, Vitest, pytest), linters (ESLint, Pylint), build tools (webpack, tsc), and Docker — stripping repeated noise lines and compacting progress bars before the output reaches the model.
+
+<ParamField body="command" type="string" required>
+  Shell command to execute.
+</ParamField>
+
+<ParamField body="cwd" type="string" default="project root">
+  Working directory for the command.
+</ParamField>
+
+<ParamField body="level" type="string" default="normal">
+  Compression intensity. Options: `normal` (balanced), `aggressive` (more compact), `ultra` (maximum compression — may drop some detail).
+</ParamField>
+
+<ParamField body="timeout" type="number" default="60">
+  Timeout in seconds before the command is killed.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path used for configuration lookup.
+</ParamField>
+
+<Note>
+  When `enableShellExec` is `false`, the tool is not registered. Use `kirograph_compress` instead for manual compression of command output that arrived from outside KiroGraph.
+</Note>
+
+```json
+{
+  "tool": "kirograph_exec",
+  "arguments": {
+    "command": "npm test -- --reporter=verbose",
+    "level": "aggressive"
+  }
+}
+```
 
 ---
 

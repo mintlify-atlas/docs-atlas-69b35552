@@ -1,7 +1,7 @@
 ---
 title: "CLI Setup Commands: install, init, hook, uninit"
 sidebarTitle: "Setup Commands"
-description: "Reference for KiroGraph CLI setup commands: install (MCP + hooks + steering), init (create index dir), hook (global library), and uninit (remove integration files)."
+description: "KiroGraph CLI setup: install configures MCP integration, init creates the index, hook manages the global library, uninit removes integration files."
 ---
 
 KiroGraph ships two binary names — `kirograph` and the short alias `kg` — both pointing to the same executable. The setup commands wire KiroGraph into your AI coding tool, initialise the index directory, manage a cross-workspace hook library, and cleanly remove the integration when needed. Run them once per project (or per tool), then let the indexing commands take over.
@@ -115,6 +115,8 @@ After running `kirograph init` you will see a `.kirograph/` directory containing
 | `kirograph hook save --all` | Save all hooks without an interactive selection prompt |
 | `kirograph hook import [path]` | Copy hooks from the global store into the workspace |
 | `kirograph hook import --all` | Import all hooks without prompting |
+| `kirograph hook remove` | Remove hooks from the global store |
+| `kirograph hook remove --all` | Remove all global hooks without prompting |
 | `kirograph hook list` | List all hooks saved in the global store |
 
 ### Examples
@@ -131,6 +133,12 @@ kirograph hook import
 
 # Import all global hooks silently
 kirograph hook import --all
+
+# Remove hooks from the global store interactively
+kirograph hook remove
+
+# Remove all global hooks without prompting
+kirograph hook remove --all
 
 # List what's in the global store
 kirograph hook list

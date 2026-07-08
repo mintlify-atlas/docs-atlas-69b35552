@@ -1,7 +1,7 @@
 ---
-title: "Tabular Data Querying with KiroGraph-Data"
+title: "Tabular Data Querying and Profiling with KiroGraph-Data"
 sidebarTitle: "Data"
-description: "KiroGraph-Data queries CSV, JSON, Excel, Parquet, and PDF files with server-side filters, aggregations, and joins in SQLite — no data leaves your machine."
+description: "KiroGraph-Data queries CSV, JSON, Excel, Parquet, and PDF files with server-side filters, aggregations, and joins in SQLite. No data leaves your machine."
 ---
 
 KiroGraph-Data indexes tabular data files that live alongside your code — test fixtures, seed datasets, configuration tables, sample exports — and lets AI agents query them without ever reading the raw files. Filters, aggregations, and joins run server-side in SQLite. Only the result rows enter the context window, producing 95–99% token savings over naive full-file reads.
@@ -154,6 +154,23 @@ Data tools require `enableData: true`. The 10 tools add approximately **~519 tok
     | Parameter | Type | Default | Description |
     |---|---|---|---|
     | `dataset` | string | required | Dataset ID |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_data_drift — schema drift detection">
+    Detects schema drift between the last two index runs for a dataset: added or removed columns, type changes, and row count deltas.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `dataset` | string | required | Dataset ID (from `kirograph_data_list`) |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_data_history — schema snapshot history">
+    Returns the history of schema snapshots for a dataset: timestamps, row counts, column counts, and column names at each snapshot.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `dataset` | string | required | Dataset ID (from `kirograph_data_list`) |
+    | `limit` | number | `10` | Max snapshots to return (hard cap: 50) |
     | `projectPath` | string | cwd | Project root path |
   </Accordion>
 </AccordionGroup>

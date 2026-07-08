@@ -1,7 +1,7 @@
 ---
 title: "Architecture Analysis: Layers, Coupling, and Snapshots"
 sidebarTitle: "Architecture"
-description: "KiroGraph-Arch detects architectural layers, computes package coupling metrics (Ca, Ce, instability), and lets you diff graph snapshots before and after refactors."
+description: "KiroGraph-Arch detects layers, computes package coupling (Ca, Ce, instability), and lets you diff graph snapshots before and after a refactor."
 ---
 
 KiroGraph-Arch extends the semantic knowledge graph with a package-level view of your codebase. It detects logical groupings of files (packages), assigns those packages to architectural layers (api, service, data, ui, shared), computes coupling metrics for each package, and stores the results in `kirograph.db` so any MCP tool or CLI command can query them.

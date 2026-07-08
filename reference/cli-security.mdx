@@ -1,7 +1,7 @@
 ---
-title: "CLI Security Commands: vulns, sbom, sarif, secrets, sast"
+title: "CLI Security Commands: vulns, sbom, vex, secrets, flows"
 sidebarTitle: "Security Commands"
-description: "Reference for KiroGraph CLI security commands: vulnerability scanning, reachability analysis, SBOM/VEX/SARIF export, secret detection, and supply chain analysis."
+description: "KiroGraph CLI security commands: vulnerability scanning, reachability analysis, SBOM and VEX export, secret detection, and supply chain analysis."
 ---
 
 KiroGraph's security commands give you graph-aware vulnerability analysis — not just a list of CVEs, but a reachability verdict for each one, mapped through the call graph to your HTTP entry points. All security commands require `enableSecurity: true` in `.kirograph/config.json`. Re-run `kirograph index` after enabling it. The `kg` short alias works for every command shown here.
@@ -182,7 +182,7 @@ Performs lightweight SAST-style data-flow analysis, detecting dangerous flows su
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--type <type>` | Filter by flow type (`sql_injection`, `path_traversal`, `eval`, etc.) | `all` |
+| `--type <type>` | Filter by flow type: `sql`, `xss`, `eval`, `deserialize`, `path`, `all` | `all` |
 | `--format <fmt>` | `text` \| `json` | `text` |
 
 ### Examples
@@ -191,7 +191,10 @@ Performs lightweight SAST-style data-flow analysis, detecting dangerous flows su
 kirograph security flows
 
 # Only SQL injection findings
-kirograph security flows --type sql_injection
+kirograph security flows --type sql
+
+# Only XSS findings
+kirograph security flows --type xss
 
 kirograph security flows --format json
 ```
@@ -242,36 +245,28 @@ kirograph vex --output vex.json
 
 ---
 
-## `kirograph security export` (SARIF)
+## `kirograph security export`
 
-Exports a SARIF 2.1.0 report suitable for upload to GitHub Advanced Security, Azure DevOps, or any other SARIF-compatible platform. The report includes all findings from vulnerability analysis, secret detection, and data-flow analysis.
+Generates a self-contained HTML security dashboard covering vulnerabilities, reachability verdicts, dependency licenses, staleness scores, and supply-chain health. The output is a single `.html` file you can open in any browser or share with your team — no server required.
 
 ### Flags
 
-| Flag | Description |
-|------|-------------|
-| `--output <file>` | Write the SARIF report to a file instead of stdout |
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--output <file>` | Write the HTML dashboard to this path | `.kirograph/security-export.html` |
+| `--open` | Open the generated HTML file in the default browser immediately | false |
 
 ### Examples
 
 ```bash
-# Print SARIF to stdout
+# Generate the dashboard (written to .kirograph/security-export.html)
 kirograph security export
 
-# Write to file
-kirograph security export --output security.sarif
-```
+# Write to a custom path
+kirograph security export --output reports/security.html
 
-#### GitHub Advanced Security upload
-
-```yaml
-- name: Export SARIF
-  run: kirograph security export --output results.sarif
-
-- name: Upload SARIF to GitHub
-  uses: github/codeql-action/upload-sarif@v3
-  with:
-    sarif_file: results.sarif
+# Generate and open in the browser straight away
+kirograph security export --open
 ```
 
 ---
@@ -395,6 +390,34 @@ kirograph dep-confusion --format json
 
 ---
 
+## `kirograph staleness`
+
+Checks each indexed dependency against its upstream registry (npm, PyPI, crates.io, RubyGems, Packagist) and assigns a staleness score between `0.0` (current) and `1.0` (very stale). Use this to surface dependencies that have drifted far behind the latest release.
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--threshold <n>` | Show only packages with a staleness score ≥ `n` | `0.3` |
+| `--refresh` | Re-query registries for the latest version data before listing | false |
+| `--format <fmt>` | `table` \| `json` | `table` |
+
+### Examples
+
+```bash
+kirograph staleness
+
+# Only notably stale packages (score ≥ 0.5)
+kirograph staleness --threshold 0.5
+
+# Refresh version data from registries first
+kirograph staleness --refresh
+
+kirograph staleness --format json
+```
+
+---
+
 ## `kirograph licenses`
 
 Lists the license of every dependency and checks them against a configurable policy. Built-in deny list includes GPL-family and AGPL licenses; the warn list includes LGPL. Both lists can be overridden per project.
@@ -450,9 +473,9 @@ kirograph manifest --ecosystem npm --drift
 
 ---
 
-## `kirograph vuln suppress` / `kirograph vuln unsuppress`
+## `kirograph vuln suppress` / `kirograph vuln unsuppress` / `kirograph vuln suppressions`
 
-Suppresses a CVE to mark it as a false positive or accepted risk. Suppressions are stored in `.kirograph/suppressions.json` and are respected by `kirograph vulns` and `kirograph security ci-report`.
+Suppresses a CVE to mark it as a false positive or accepted risk. Suppressions are stored in `.kirograph/suppressions.json` and are respected by `kirograph vulns` and `kirograph security ci-report`. Use `kirograph vuln suppressions` to list all active suppressions.
 
 ### Flags for `vuln suppress`
 
@@ -460,6 +483,12 @@ Suppresses a CVE to mark it as a false positive or accepted risk. Suppressions a
 |------|-------------|
 | `--reason <text>` | Reason for the suppression |
 | `--expires <date>` | Expiry date in ISO format (e.g. `2026-12-31`) |
+
+### Flags for `vuln suppressions`
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--format <fmt>` | `table` \| `json` | `table` |
 
 ### Examples
 
@@ -472,6 +501,12 @@ kirograph vuln suppress CVE-2024-5678 --reason "Accepted risk" --expires 2025-12
 
 # Lift a suppression
 kirograph vuln unsuppress CVE-2024-1234
+
+# List all active suppressions
+kirograph vuln suppressions
+
+# JSON output
+kirograph vuln suppressions --format json
 ```
 
 ---
@@ -512,11 +547,14 @@ kirograph remediation --format json
 | `kirograph security flows [path]` | `enableSecurity` | `--type`, `--format` |
 | `kirograph sbom [path]` | `enableSecurity` | `--output` |
 | `kirograph vex [path]` | `enableSecurity` | `--output` |
-| `kirograph security export [path]` | `enableSecurity` | `--output` |
+| `kirograph security export [path]` | `enableSecurity` | `--output`, `--open` |
 | `kirograph security ci-report [path]` | `enableSecurity` | `--format`, `--fail-on`, `--output` |
 | `kirograph supply-chain [path]` | `enableSecurity` | `--threshold`, `--refresh`, `--format` |
 | `kirograph dep-confusion [path]` | `enableSecurity` | `--format` |
+| `kirograph staleness [path]` | `enableSecurity` | `--threshold`, `--refresh`, `--format` |
 | `kirograph licenses [path]` | `enableSecurity` | `--policy`, `--deny`, `--warn`, `--format` |
 | `kirograph manifest [path]` | — | `--package`, `--ecosystem`, `--drift` |
 | `kirograph vuln suppress <cveId>` | `enableSecurity` | `--reason`, `--expires` |
+| `kirograph vuln unsuppress <cveId>` | `enableSecurity` | — |
+| `kirograph vuln suppressions` | `enableSecurity` | `--format` |
 | `kirograph remediation [path]` | `enableSecurity` | `--overdue-only`, `--format` |

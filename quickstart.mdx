@@ -1,7 +1,7 @@
 ---
-title: "Get Started with KiroGraph in 5 Minutes"
+title: "KiroGraph Quickstart: Install, Index, and Query in 5 Min"
 sidebarTitle: "Quickstart"
-description: "Install KiroGraph, connect it to Kiro, index your project, and make your first graph query — all in under 5 minutes."
+description: "Install KiroGraph from source, run the interactive installer for Kiro, index your project, and make your first graph query in under five minutes."
 ---
 
 This guide walks you from zero to a live `kirograph_context` call inside Kiro IDE. You will install the CLI, run the interactive installer to wire up Kiro, index your project, and verify that the MCP tool is available. The whole flow takes about five minutes for a medium-sized codebase.
@@ -61,7 +61,7 @@ When it finishes, the following files are written to your project:
 | File | Purpose |
 |---|---|
 | `.kiro/settings/mcp.json` | Registers the KiroGraph MCP server with Kiro IDE and CLI |
-| `.kiro/hooks/*.json` | Auto-sync hooks — keeps the index fresh after each agent session |
+| `.kiro/hooks/*.json` (v1.x) or `.kiro/hooks/*.kiro.hook` (v0.x beta) | Auto-sync hooks — keeps the index fresh after each agent session |
 | `.kiro/steering/kirograph.md` | Teaches Kiro how and when to use the graph tools |
 | `.kiro/agents/kirograph.json` | Custom agent config for Kiro CLI |
 | `.kirograph/config.json` | Your KiroGraph configuration (edit any time) |
@@ -78,7 +78,7 @@ kirograph index
 
 KiroGraph scans every file that matches your configuration's `include`/`exclude` patterns, parses each one with tree-sitter into an AST, extracts symbols and relationships, and writes the result to a local SQLite database. You will see a live progress indicator as files are processed.
 
-```
+```text
   Indexing...
   ✓ Indexed 312 files, 4,821 symbols, 11,204 edges
 ```
@@ -115,7 +115,7 @@ kirograph query authenticate --kind function
 
 Restart Kiro IDE so it picks up the new MCP server entry in `.kiro/settings/mcp.json`. Once restarted, open the agent panel and try a prompt that would normally require many file reads:
 
-```
+```text
 What functions call authenticate, and what would break if I changed its signature?
 ```
 

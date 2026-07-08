@@ -1,7 +1,7 @@
 ---
-title: "CLI Analysis Commands: query, context, affected, snapshot"
+title: "CLI Analysis Commands: query, context, affected, graph"
 sidebarTitle: "Analysis Commands"
-description: "Reference for KiroGraph CLI analysis commands: symbol search, context building, affected test finding, graph traversal, and snapshot management with all flags."
+description: "KiroGraph CLI analysis: query symbols, build context, find affected tests, traverse the dependency graph, and manage point-in-time snapshots."
 ---
 
 Once the graph is indexed you can query it directly from the terminal — without starting a full AI session. The analysis commands cover symbol search, semantic context building, dependency traversal, dead-code detection, blast-radius analysis, and point-in-time snapshots. All commands accept the `kg` short alias.
@@ -324,10 +324,10 @@ kirograph type-hierarchy BaseController --direction down
 kirograph type-hierarchy BaseController --direction up --json
 ```
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--direction <dir>` | `up` (base types) \| `down` (derived types) \| `both` | `both` |
-| `--json` | `-j` | JSON output |
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--direction <dir>` | | `up` (base types) \| `down` (derived types) \| `both` | `both` |
+| `--json` | `-j` | JSON output | false |
 | `--path <path>` | `-p` | Project path | `cwd` |
 
 ---

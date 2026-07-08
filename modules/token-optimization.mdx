@@ -1,7 +1,7 @@
 ---
-title: "Token Optimization: Compression and File Caching"
+title: "Token Optimization: Shell Compression and File Caching"
 sidebarTitle: "Token Optimization"
-description: "KiroGraph cuts token usage via shell output compression (60–90% savings), prose compression, and cached file reads that return a ~13-token marker for unchanged files."
+description: "KiroGraph reduces token usage via shell output compression (60–90% savings), prose compression, and cached file reads that skip unchanged files entirely."
 ---
 
 Every token consumed by an AI agent has a cost — in latency, in API spend, and in the shrinking space available for code and reasoning. KiroGraph ships four complementary token reduction systems: shell output compression, prose compression (Caveman mode), on-demand text compression, and file read caching. Each operates independently and can be enabled or tuned without affecting the others.
@@ -64,7 +64,7 @@ The raw output of a git log can easily run 400–800 tokens. After filtering: ty
 
 ### Token Analytics
 
-`kirograph_gain` reports cumulative savings from both shell compression (measured exactly) and graph tools (estimated heuristically).
+`kirograph_gain` reports cumulative savings from both shell compression (measured exactly) and graph tools (estimated heuristically). It is part of the `enableAgentUtils` feature set and requires `enableAgentUtils: true`.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -235,4 +235,4 @@ Each enabled flag adds tool descriptions to the model context on every MCP call.
 | `cavemanMode` | string | `off` | Prose compression mode: `off`, `lite`, `full`, `ultra` |
 | `enableShellExec` | boolean | `false` | Enable the `kirograph_exec` shell tool |
 | `enableGeneralCompression` | boolean | `false` | Enable the `kirograph_compress` on-demand compression tool |
-| `enableAgentUtils` | boolean | `true` | Enable `kirograph_read`, `kirograph_retrieve`, and `kirograph_budget` |
+| `enableAgentUtils` | boolean | `false` | Enable `kirograph_read`, `kirograph_retrieve`, `kirograph_gain`, and `kirograph_budget` |

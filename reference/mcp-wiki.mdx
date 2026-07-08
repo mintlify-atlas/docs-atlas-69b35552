@@ -1,7 +1,7 @@
 ---
-title: "Wiki Module MCP Tools Reference"
+title: "KiroGraph Wiki MCP Tools — Ingest, Diff, and Search"
 sidebarTitle: "Wiki Tools"
-description: "Reference for KiroGraph's wiki MCP tools implementing the Karpathy LLM wiki pattern: ingest, apply, lint, search, and manage knowledge pages across sessions."
+description: "Reference for KiroGraph's 10 wiki MCP tools: ingest sources, apply WIKI_DIFF blocks, lint, search, and manage versioned knowledge pages across sessions."
 ---
 
 KiroGraph's wiki module implements the **Karpathy LLM wiki pattern**: the agent reads source text, produces structured `WIKI_DIFF` blocks, and writes them to a versioned SQLite-backed Markdown wiki stored at `.kirograph/wiki/`. The knowledge base grows incrementally across sessions — each `kirograph_wiki_ingest` call enriches the wiki without clobbering prior content. All tools require `enableWiki: true` in `.kirograph/config.json`.

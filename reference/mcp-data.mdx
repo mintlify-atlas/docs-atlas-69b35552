@@ -1,5 +1,5 @@
 ---
-title: "Data Module MCP Tools Reference"
+title: "KiroGraph Data MCP Tools — Query, Aggregate, and Join"
 sidebarTitle: "Data Tools"
 description: "Reference for KiroGraph's 10 data MCP tools for querying CSV, JSON, Excel, Parquet, and PDF files with filters, aggregations, joins, and quality checks."
 ---
@@ -330,6 +330,39 @@ Detect schema drift by comparing the current dataset profile against the most re
   "tool": "kirograph_data_drift",
   "arguments": { "dataset": "orders" }
 }
+```
+
+---
+
+## `kirograph_data_history`
+
+Return a chronological list of schema snapshots for a dataset. Each snapshot records the column schema, row count, and the timestamp when it was captured during indexing. Use this to understand how a dataset has evolved over time.
+
+<ParamField body="dataset" type="string" required>
+  Dataset ID from `kirograph_data_list`.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of snapshots to return. Defaults to `10`, capped at `50`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_data_history",
+  "arguments": { "dataset": "orders", "limit": 5 }
+}
+```
+
+```text title="Example output"
+Schema history for "orders" (3 snapshot(s)):
+
+2025-06-15 09:14:02  rows: 142,500  cols: 12  schema: order_id, user_id, amount, status, ...
+2025-05-01 08:30:11  rows: 118,200  cols: 11  schema: order_id, user_id, amount, status, ...
+2025-03-10 07:55:44  rows: 92,000   cols: 11  schema: order_id, user_id, amount, status, ...
 ```
 
 ---

@@ -1,7 +1,7 @@
 ---
 title: "Reachability-Aware Security Analysis with KiroGraph"
 sidebarTitle: "Security"
-description: "KiroGraph-Sec goes beyond CVE reporting — it uses your call graph to check whether vulnerable dependency code is actually reachable from your application's entry points."
+description: "KiroGraph-Sec traverses your call graph to check if CVE-affected dependency code is reachable from entry points, slashing noise from irrelevant advisories."
 ---
 
 Traditional software composition analysis (SCA) tools report every CVE that affects any dependency in your lockfile, regardless of whether your application ever calls the vulnerable code. KiroGraph-Sec is different: it traverses the call graph from your application's entry points to determine whether a vulnerable code path is actually reachable. A dependency that is installed but never called cannot be exploited.
@@ -80,7 +80,6 @@ The security pipeline runs as the final phase of indexing, after code extraction
 | Swift PM | `Package.swift` | `Package.resolved` |
 | Dart / Flutter | `pubspec.yaml` | `pubspec.lock` |
 | Elixir / Hex | `mix.exs` | `mix.lock` |
-| Scala sbt | `build.sbt` | — |
 
 ---
 
