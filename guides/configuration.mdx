@@ -1,0 +1,350 @@
+---
+title: "Configure KiroGraph with .kirograph/config.json"
+sidebarTitle: "Configuration"
+description: "Reference for all KiroGraph config fields: indexing, semantic search engines, architecture, security, memory, data, docs, and agent behavior options."
+---
+
+KiroGraph stores its configuration in `.kirograph/config.json` at the root of your project. You can edit it directly with any text editor, or run `kirograph install` in an existing project to launch the interactive setup wizard that reads and updates the same file.
+
+## Where the Config Lives
+
+The file is created the first time you run `kirograph install` or `kirograph index`. To open it in your editor:
+
+```bash
+# From your project root
+code .kirograph/config.json
+```
+
+---
+
+## Complete Example
+
+The following snippet enables the most commonly used modules:
+
+```json
+{
+  "languages": [],
+  "include": [],
+  "exclude": ["node_modules/**", "dist/**", "build/**", ".git/**", "*.min.js", ".kirograph/**"],
+  "maxFileSize": 1048576,
+  "extractDocstrings": true,
+  "trackCallSites": false,
+  "frameworkHints": [],
+  "fuzzyResolutionThreshold": 0.5,
+  "enableEmbeddings": true,
+  "embeddingModel": "nomic-ai/nomic-embed-text-v1.5",
+  "embeddingDim": 768,
+  "semanticEngine": "turboquant",
+  "turboquantBits": 3,
+  "enableArchitecture": true,
+  "architectureLayers": {
+    "api":     ["src/routes/**", "src/controllers/**"],
+    "service": ["src/domain/**", "src/application/**"],
+    "data":    ["src/infrastructure/**"]
+  },
+  "enableSecurity": true,
+  "securityDatabases": ["OSV"],
+  "securityAutoEnrich": true,
+  "enableMemory": true,
+  "memoryContextLimit": 3,
+  "enableDocs": true,
+  "docsLinkCode": true,
+  "cavemanMode": "off",
+  "shellCompressionLevel": "normal",
+  "minLogLevel": "warn"
+}
+```
+
+<Note>
+  Default exclude patterns are: `node_modules/**`, `dist/**`, `build/**`, `.git/**`, `*.min.js`, `.kirograph/**`. These apply even when `exclude` is an empty array.
+</Note>
+
+---
+
+## Config Field Reference
+
+### Indexing
+
+<ParamField body="languages" type="string[]" default="[]">
+  Limit indexing to specific language names (e.g. `["typescript", "python"]`). An empty array indexes all supported languages.
+</ParamField>
+
+<ParamField body="include" type="string[]" default="[]">
+  Glob patterns that must match for a file to be indexed. An empty array includes everything not covered by `exclude`.
+</ParamField>
+
+<ParamField body="exclude" type="string[]" default="see note">
+  Glob patterns for files and directories to skip during indexing. Merged with the default exclusion list.
+</ParamField>
+
+<ParamField body="maxFileSize" type="number" default="1048576">
+  Skip any file larger than this byte count (default: 1 MB). Useful to skip generated or minified assets.
+</ParamField>
+
+<ParamField body="extractDocstrings" type="boolean" default="true">
+  Extract JSDoc comments, Python docstrings, and inline documentation comments for each symbol.
+</ParamField>
+
+<ParamField body="trackCallSites" type="boolean" default="true">
+  Record line and column numbers for call edges in the graph. Disable to reduce DB size on very large codebases.
+</ParamField>
+
+<ParamField body="frameworkHints" type="string[]" default="auto">
+  Override auto-detected frameworks (e.g. `["react", "express"]`). See [Languages & Frameworks](/guides/languages) for the full list.
+</ParamField>
+
+<ParamField body="fuzzyResolutionThreshold" type="number" default="0.5">
+  Name-matching threshold for cross-file symbol resolution (range `0.0`–`1.0`). Lower values produce more aggressive fuzzy matches.
+</ParamField>
+
+<ParamField body="syncWarningThreshold" type="number" default="10">
+  Emit a warning in `kirograph_status` when the number of pending (unsynced) files exceeds this value.
+</ParamField>
+
+---
+
+### Semantic Search
+
+<ParamField body="enableEmbeddings" type="boolean" default="false">
+  Generate vector embeddings for functions, methods, classes, interfaces, type aliases, components, and modules. Required for natural-language search. The embedding model is downloaded to `~/.kirograph/models/` on first use.
+</ParamField>
+
+<ParamField body="embeddingModel" type="string" default="nomic-ai/nomic-embed-text-v1.5">
+  HuggingFace `feature-extraction` model ID. Changing this requires a full re-index (`kirograph index --force`).
+</ParamField>
+
+<ParamField body="embeddingDim" type="number" default="768">
+  Output dimension of the chosen embedding model. Must match the actual model output or KiroGraph will warn and use the real value.
+</ParamField>
+
+<ParamField body="semanticEngine" type="string" default="cosine">
+  Vector search backend. One of: `cosine`, `turboquant`, `turbovec`, `sqlite-vec`, `orama`, `pglite`, `lancedb`, `qdrant`, `typesense`. See [Semantic Search](/guides/semantic-search) for details on each engine.
+</ParamField>
+
+<ParamField body="turboquantBits" type="number" default="3">
+  TurboQuant bits per coordinate (range `1`–`8`). Controls the compression/quality tradeoff. Requires `npm install turboquant-js`. Changing this value requires `kirograph index --force`.
+</ParamField>
+
+<ParamField body="turbovecBits" type="number" default="4">
+  TurboVec bits per coordinate (`2`, `3`, or `4`). Requires the built native addon. Changing this value requires `kirograph index --force`.
+</ParamField>
+
+<ParamField body="turboquantMemDocs" type="boolean" default="false">
+  Use TurboQuant ANN index for memory observation and doc section search in addition to code nodes.
+</ParamField>
+
+<ParamField body="turbovecMemDocs" type="boolean" default="false">
+  Use TurboVec ANN index for memory observation and doc section search in addition to code nodes.
+</ParamField>
+
+<ParamField body="qdrantDashboard" type="boolean" default="false">
+  Open the Qdrant web dashboard after indexing completes.
+</ParamField>
+
+<ParamField body="typesenseDashboard" type="boolean" default="false">
+  Open the Typesense web dashboard after indexing completes.
+</ParamField>
+
+---
+
+### Architecture
+
+<ParamField body="enableArchitecture" type="boolean" default="false">
+  Enable architecture analysis: package graph construction, layer detection, and coupling metric computation. Required by `enableSecurity` (auto-enabled if missing).
+</ParamField>
+
+<ParamField body="architectureLayers" type="object" default="auto">
+  Custom layer definitions as a map of layer name → glob patterns. Overrides or extends auto-detected layers.
+
+  ```json
+  {
+    "api":     ["src/routes/**", "src/controllers/**"],
+    "service": ["src/domain/**", "src/application/**"],
+    "data":    ["src/infrastructure/**", "src/persistence/**"]
+  }
+  ```
+</ParamField>
+
+---
+
+### Security
+
+<ParamField body="enableSecurity" type="boolean" default="false">
+  Enable dependency vulnerability detection and reachability analysis. Automatically enables `enableArchitecture` if it is not already set.
+</ParamField>
+
+<ParamField body="securityDatabases" type="string[]" default='["OSV"]'>
+  Vulnerability databases to query. Currently supported: `OSV`.
+</ParamField>
+
+<ParamField body="securityAutoEnrich" type="boolean" default="true">
+  Auto-run vulnerability enrichment after manifest parsing during indexing. Set to `false` to run enrichment on-demand only via `kirograph vulns --refresh`.
+</ParamField>
+
+<ParamField body="enablePatterns" type="boolean" default="false">
+  Enable AST pattern-matching SAST via `@ast-grep/napi`. Requires `npm install @ast-grep/napi`. See [Security](/guides/security) for bundled rules.
+</ParamField>
+
+<ParamField body="patternLibraryPath" type="string" default="—">
+  Path to a directory of custom YAML pattern rules. Rules are merged with the bundled set.
+</ParamField>
+
+<ParamField body="patternSeverityThreshold" type="string" default="low">
+  Minimum severity to store pattern findings. One of: `critical`, `high`, `medium`, `low`.
+</ParamField>
+
+---
+
+### Memory
+
+<ParamField body="enableMemory" type="boolean" default="false">
+  Enable persistent cross-session memory. Observations are stored in `.kirograph/memory.db` and surfaced in `kirograph_context`.
+</ParamField>
+
+<ParamField body="memorySearchAlpha" type="number" default="0.5">
+  Blend weight for hybrid memory search (`0` = full-text only, `1` = vector only).
+</ParamField>
+
+<ParamField body="memoryKeepRaw" type="boolean" default="true">
+  Store the original observation text alongside the compressed version.
+</ParamField>
+
+<ParamField body="memoryMaxObservations" type="number" default="10000">
+  Maximum stored observations before the oldest are auto-pruned.
+</ParamField>
+
+<ParamField body="memorySessionTimeout" type="number" default="3600000">
+  Session timeout in milliseconds (default: 1 hour). Observations after this window start a new session.
+</ParamField>
+
+<ParamField body="memoryContextLimit" type="number" default="3">
+  Maximum number of memory observations surfaced per `kirograph_context` call.
+</ParamField>
+
+<ParamField body="memoryContextThreshold" type="number" default="0.3">
+  Minimum relevance score required for a memory observation to appear in context results.
+</ParamField>
+
+<ParamField body="memoryExcludePatterns" type="string[]" default="[]">
+  Glob patterns for files to exclude from symbol linking in memory observations.
+</ParamField>
+
+---
+
+### Watchmen
+
+<ParamField body="enableWatchmen" type="boolean" default="false">
+  Enable Watchmen, which auto-synthesizes workspace briefs from accumulated memory observations. Requires `enableMemory: true`.
+</ParamField>
+
+<ParamField body="watchmenThreshold" type="number" default="5">
+  Minimum number of new observations since last synthesis before a `watchmenReady` event fires.
+</ParamField>
+
+<ParamField body="watchmenSynthesisMode" type="string" default="local">
+  How briefs are synthesized. `local` runs a local HuggingFace model on-device (no API key, no external calls). `agent` delegates to the active AI agent via an `askAgent` hook (Kiro only, consumes tokens).
+</ParamField>
+
+<ParamField body="watchmenLocalModel" type="string" default="onnx-community/gemma-4-E4B-it-ONNX">
+  HuggingFace model used for local synthesis. Downloaded once to `~/.kirograph/models/` (~3–4 GB). Only used when `watchmenSynthesisMode: "local"`.
+</ParamField>
+
+---
+
+### Documentation
+
+<ParamField body="enableDocs" type="boolean" default="false">
+  Enable documentation indexing for section-level retrieval via `kirograph_docs_*` tools.
+</ParamField>
+
+<ParamField body="docsInclude" type="string[]" default='["**/*.md", ...]'>
+  Glob patterns for documentation files to include.
+</ParamField>
+
+<ParamField body="docsExclude" type="string[]" default='["node_modules/**", ...]'>
+  Glob patterns for documentation files to exclude.
+</ParamField>
+
+<ParamField body="docsLinkCode" type="boolean" default="true">
+  Automatically link documentation sections to code symbols by name.
+</ParamField>
+
+<ParamField body="docsContextLimit" type="number" default="0">
+  Maximum doc sections surfaced in `kirograph_context` (0 = disabled).
+</ParamField>
+
+<ParamField body="docsContextThreshold" type="number" default="0.5">
+  Minimum confidence score for a doc reference to appear in context results.
+</ParamField>
+
+<ParamField body="docsMaxFileSize" type="number" default="1048576">
+  Maximum documentation file size to index (bytes).
+</ParamField>
+
+<ParamField body="docsSummarization" type="string" default="first-sentence">
+  Section summary strategy. One of: `embedding`, `first-sentence`, `off`.
+</ParamField>
+
+---
+
+### Data
+
+<ParamField body="enableData" type="boolean" default="false">
+  Enable tabular data indexing and querying for CSV, TSV, JSONL, XLSX, Parquet, and PDF files.
+</ParamField>
+
+<ParamField body="dataInclude" type="string[]" default='["**/*.csv", "**/*.tsv", ...]'>
+  Glob patterns for data files to include. Defaults cover CSV, TSV, JSONL, NDJSON, XLSX, XLS, Parquet, `data/**/*.json`, and PDF.
+</ParamField>
+
+<ParamField body="dataExclude" type="string[]" default='["node_modules/**", ...]'>
+  Glob patterns for data files to exclude.
+</ParamField>
+
+<ParamField body="dataLinkCode" type="boolean" default="true">
+  Auto-link data files to code symbols via path detection.
+</ParamField>
+
+<ParamField body="dataContextLimit" type="number" default="0">
+  Maximum datasets surfaced in `kirograph_context` (0 = disabled). Keep at `0`–`1` for PDF datasets as `content` columns are verbose.
+</ParamField>
+
+<ParamField body="dataMaxFileSize" type="number" default="52428800">
+  Maximum data file size to index (default: 50 MB).
+</ParamField>
+
+<ParamField body="dataMaxRows" type="number" default="1000000">
+  Maximum rows to index per data file.
+</ParamField>
+
+<ParamField body="dataQueryLimit" type="number" default="500">
+  Hard cap on rows returned per query.
+</ParamField>
+
+<ParamField body="dataMaxResponseTokens" type="number" default="8000">
+  Maximum token budget per data tool response.
+</ParamField>
+
+---
+
+### Agent Behavior
+
+<ParamField body="cavemanMode" type="string" default="off">
+  Communication style for agent responses. One of: `off`, `lite`, `full`, `ultra`. Higher levels compress agent output more aggressively.
+</ParamField>
+
+<ParamField body="shellCompressionLevel" type="string" default="normal">
+  Shell output compression level. One of: `off`, `normal`, `aggressive`, `ultra`. Controls how `kirograph_exec` compresses command output before returning it.
+</ParamField>
+
+<ParamField body="enableAgentUtils" type="boolean" default="false">
+  Enable agent utility tools: `kirograph_read` (cached file reads with 7 modes), `kirograph_retrieve` (context-compressed retrieval), and `kirograph_budget` (session budget tracking).
+</ParamField>
+
+<ParamField body="enableGeneralCompression" type="boolean" default="false">
+  Enable `kirograph_compress` for on-demand compression of arbitrary text. Uses RTK-style shell filters (with `command` hint) or caveman grammar (without). Independent of `shellCompressionLevel` and `cavemanMode`.
+</ParamField>
+
+<ParamField body="minLogLevel" type="string" default="warn">
+  Minimum log level written to the KiroGraph log. One of: `debug`, `info`, `warn`, `error`.
+</ParamField>

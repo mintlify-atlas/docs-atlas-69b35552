@@ -1,0 +1,237 @@
+---
+title: "Semantic Search Engines and Embedding Configuration"
+sidebarTitle: "Semantic Search"
+description: "Enable vector-based natural language symbol search in KiroGraph using one of 9 engines — from zero-dependency cosine similarity to SIMD-accelerated TurboVec in Rust."
+---
+
+By default, KiroGraph resolves symbols using exact name lookup and full-text search. Enabling embeddings adds a third search mode: natural language queries. When you ask `kirograph_search` for "functions that handle authentication", it embeds the query text, computes similarity against all indexed symbols, and returns the closest matches — even if none of them contain the word "authentication" in their name.
+
+Semantic search acts as a fallback layer inside `kirograph_search` and `kirograph_context`, so it complements rather than replaces exact and FTS lookup.
+
+---
+
+## Enabling Embeddings
+
+Add the following to `.kirograph/config.json`:
+
+```json
+{
+  "enableEmbeddings": true
+}
+```
+
+On the first index run after enabling embeddings, KiroGraph downloads the default model (~130 MB) to `~/.kirograph/models/`. Subsequent runs use the cached model with no network access.
+
+Embeddings are generated for these node kinds only: `function`, `method`, `class`, `interface`, `type_alias`, `component`, `module`.
+
+---
+
+## Embedding Models
+
+`kirograph install` offers a curated selection of models compatible with `@huggingface/transformers`. All models run fully locally — no API key, no external inference calls.
+
+| Model | Dim | Size | Notes |
+|-------|-----|------|-------|
+| `nomic-ai/nomic-embed-text-v1.5` | 768 | ~130 MB | **Default.** Best quality for code search. |
+| `onnx-community/embeddinggemma-300m-ONNX` | 768 | ~300 MB | Google Gemma-based. Multilingual, 2048-token context window. |
+| `Xenova/all-MiniLM-L6-v2` | 384 | ~23 MB | Lightweight and fast. Lower recall accuracy. |
+| `BAAI/bge-base-en-v1.5` | 768 | ~110 MB | Strong general-purpose alternative to nomic. |
+| Custom | any | — | Any HuggingFace `feature-extraction` model. Supply the ID and output dimension. |
+
+Switching models requires a full re-index: `kirograph index --force`.
+
+---
+
+## Semantic Engines
+
+KiroGraph supports nine vector search backends. Choose one via `semanticEngine` in config. All non-`cosine` engines fall back silently to `cosine` if their optional dependencies are not installed.
+
+<Note>
+  Switching engines or changing quantization settings (e.g. `turboquantBits`) invalidates the existing vector store. Run `kirograph index --force` to rebuild from scratch after changing the engine.
+</Note>
+
+### `cosine` (default)
+
+In-process cosine similarity over all stored embeddings. No extra dependencies required. Performs a linear scan over the `vectors` table in `kirograph.db`.
+
+```json
+{ "enableEmbeddings": true, "semanticEngine": "cosine" }
+```
+
+Best for small to medium projects (under ~5,000 symbols) where setup simplicity matters more than search speed.
+
+---
+
+### `turboquant`
+
+ANN index powered by [turboquant-js](https://github.com/danilodevhub/turboquant-js), a pure TypeScript implementation of [Google's TurboQuant algorithm](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/). **Zero native dependencies.**
+
+Each embedding is compressed at index time via Walsh-Hadamard rotation and Lloyd-Max scalar quantization. A 768-dim `Float32Array` (3,072 bytes) is stored as ~120 bytes at 3 bits — roughly 25× smaller.
+
+```json
+{ "enableEmbeddings": true, "semanticEngine": "turboquant" }
+```
+
+```bash
+npm install turboquant-js
+```
+
+The `turboquantBits` field (default: `3`, range: `1`–`8`) controls the quality/compression tradeoff:
+
+| Bits | Compression | Recall quality |
+|------|-------------|---------------|
+| `1` | ~100× | Low |
+| `3` | ~25× | Good (default) |
+| `4` | ~20× | Better |
+| `8` | ~8× | High |
+
+The compressed index is saved to `.kirograph/turboquant.bin` and reloaded in milliseconds on startup.
+
+---
+
+### `turbovec`
+
+<Warning>
+  TurboVec requires a **Rust toolchain** to build the native addon. Install Rust from [https://rustup.rs](https://rustup.rs) before proceeding. On Windows, `kirograph install` cannot automate this step — install Rust manually first.
+</Warning>
+
+Same TurboQuant algorithm implemented in Rust via [turbovec](https://github.com/RyanCodrai/turbovec) and exposed to Node.js as a napi-rs native addon (`native/turbovec-node/`). SIMD-accelerated: **NEON on ARM64** (Apple Silicon, AWS Graviton) and **AVX-512BW on x86-64**.
+
+```json
+{ "enableEmbeddings": true, "semanticEngine": "turbovec", "turbovecBits": 4 }
+```
+
+Build the native addon once:
+
+```bash
+# Linux only: sudo apt install libopenblas-dev
+cd native/turbovec-node && npm install && npm run build
+```
+
+`turbovecBits` accepts `2`, `3`, or `4` (tighter range than TurboQuant's 1–8 due to Rust-level validation). The index is saved to `.kirograph/turbovec.tvim`.
+
+`kirograph install` handles the Rust toolchain and addon build automatically on macOS and Linux.
+
+---
+
+### `sqlite-vec`
+
+Approximate nearest-neighbour (ANN) index backed by the [sqlite-vec](https://github.com/asg017/sqlite-vec) native extension. Sub-linear search time with a small binary dependency.
+
+```json
+{ "enableEmbeddings": true, "semanticEngine": "sqlite-vec" }
+```
+
+```bash
+npm install better-sqlite3 sqlite-vec
+```
+
+---
+
+### `orama`
+
+Hybrid full-text + vector search powered by [Orama](https://github.com/oramasearch/orama). Pure JavaScript — no native compilation required.
+
+```json
+{ "enableEmbeddings": true, "semanticEngine": "orama" }
+```
+
+```bash
+npm install @orama/orama @orama/plugin-data-persistence
+```
+
+---
+
+### `pglite`
+
+Hybrid search via [PGlite](https://github.com/electric-sql/pglite) — WASM PostgreSQL with the `pgvector` extension. Produces exact vector results using standard PostgreSQL semantics.
+
+```json
+{ "enableEmbeddings": true, "semanticEngine": "pglite" }
+```
+
+```bash
+npm install @electric-sql/pglite
+```
+
+---
+
+### `lancedb`
+
+ANN vector search via [LanceDB](https://github.com/lancedb/lancedb). Pure JavaScript, uses the Apache Lance columnar format.
+
+```json
+{ "enableEmbeddings": true, "semanticEngine": "lancedb" }
+```
+
+```bash
+npm install @lancedb/lancedb
+```
+
+---
+
+### `qdrant`
+
+ANN vector search via [Qdrant](https://github.com/qdrant/qdrant) running in embedded mode. Uses an HNSW index.
+
+```json
+{ "enableEmbeddings": true, "semanticEngine": "qdrant" }
+```
+
+```bash
+npm install qdrant-local
+```
+
+Set `qdrantDashboard: true` to open the Qdrant web UI after indexing.
+
+---
+
+### `typesense`
+
+ANN vector search via [Typesense](https://github.com/typesense/typesense) in embedded mode. The Typesense binary (~37 MB) is auto-downloaded on first use.
+
+```json
+{ "enableEmbeddings": true, "semanticEngine": "typesense" }
+```
+
+```bash
+npm install typesense
+```
+
+Set `typesenseDashboard: true` to open the Typesense dashboard after indexing.
+
+---
+
+## Engine Comparison
+
+<Tip>
+  After switching engines, always run `kirograph index --force` to rebuild the vector store with the new backend.
+</Tip>
+
+| Engine | Search type | Extra deps | Native? | Best for |
+|--------|-------------|------------|---------|----------|
+| `cosine` | Exact cosine, linear scan | none | — | Small/medium projects, zero setup |
+| `turboquant` | ANN, sub-linear | `turboquant-js` | No (pure JS) | Large codebases on CI/ARM with no native deps; 25× RAM savings |
+| `turbovec` | ANN, sub-linear | napi-rs build (`rustc`) | Yes (Rust) | Fastest SIMD search; one-time Rust build; macOS/Linux/Windows |
+| `sqlite-vec` | ANN, sub-linear | `better-sqlite3`, `sqlite-vec` | Yes | Large codebases; fast ANN with small binary |
+| `orama` | Hybrid (FTS + vector) | `@orama/orama`, `@orama/plugin-data-persistence` | No (JS) | Best result quality without native deps |
+| `pglite` | Hybrid (FTS + vector), exact | `@electric-sql/pglite` | No (WASM) | Exact results with PostgreSQL semantics |
+| `lancedb` | ANN, sub-linear | `@lancedb/lancedb` | No (JS) | Fast ANN without native compilation |
+| `qdrant` | ANN (HNSW), sub-linear | `qdrant-local` | Yes (binary) | Full Qdrant feature set in embedded mode |
+| `typesense` | ANN (HNSW), sub-linear | `typesense` | Yes (binary) | Fast ANN with auto-downloaded binary |
+
+### Storage Locations
+
+| Engine | Vector store location |
+|--------|-----------------------|
+| `cosine` | `kirograph.db` — `vectors` table |
+| `turboquant` | `.kirograph/turboquant.bin` |
+| `turbovec` | `.kirograph/turbovec.tvim` + `turbovec.tvim.ids` |
+| `sqlite-vec` | `.kirograph/vec.db` |
+| `orama` | `.kirograph/orama.json` |
+| `pglite` | `.kirograph/pglite/` |
+| `lancedb` | `.kirograph/lancedb/` |
+| `qdrant` | `.kirograph/qdrant/` |
+| `typesense` | `.kirograph/typesense/` |
+
+All engines use `kirograph.db` (SQLite) as the primary graph store. The vector store is always a separate file or directory alongside it.

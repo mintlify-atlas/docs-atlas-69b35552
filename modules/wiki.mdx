@@ -1,0 +1,164 @@
+---
+title: "LLM Wiki: Compounding Knowledge Across Sessions"
+sidebarTitle: "Wiki"
+description: "KiroGraph-Wiki implements the LLM wiki pattern — markdown pages that compound codebase knowledge across sessions with conflict resolution and full-text search."
+---
+
+KiroGraph-Wiki implements the [LLM wiki pattern](https://x.com/karpathy/status/1866684706716340254) described by Andrej Karpathy. Instead of accumulating facts in an ever-growing log, the wiki maintains a set of markdown pages that are overwritten and refined as new information arrives. Knowledge compounds rather than piles up — each ingest pass makes existing pages more accurate and more complete.
+
+Pages live in `.kirograph/wiki/` alongside `kirograph.db`. They are plain markdown files, searchable via full-text search, and automatically included in `kirograph_context` results when relevant.
+
+## Enabling Wiki
+
+Add `enableWiki` to `.kirograph/config.json`:
+
+```json
+{
+  "enableWiki": true
+}
+```
+
+This registers 10 wiki MCP tools and initializes the `.kirograph/wiki/` directory with `SCHEMA.md` (the LLM's instructions for page structure) and `MANIFEST.md` (the page index).
+
+## How It Works
+
+The wiki follows a three-operation cycle that the agent runs whenever new information should be incorporated.
+
+<Steps>
+  <Step title="Ingest — build a structured prompt">
+    The agent calls `kirograph_wiki_ingest` with a source text (a source file, a design document, a conversation summary). KiroGraph returns a structured ingest prompt that includes the current SCHEMA.md, the MANIFEST.md index, and the relevant existing pages — giving the LLM everything it needs to produce a precise diff.
+
+    In `wikiSynthesisMode: "local"`, the source is queued in SQLite and synthesis runs automatically at the `agentStop` hook via `kirograph wiki synthesize`.
+  </Step>
+  <Step title="Apply — write the WIKI_DIFF">
+    In `agent` mode, the LLM produces one or more `WIKI_DIFF` blocks and calls `kirograph_wiki_apply_diff` with the diff string. KiroGraph parses the blocks, upserts sections, creates new pages, and reports any conflicts.
+  </Step>
+  <Step title="Lint — validate consistency">
+    `kirograph_wiki_lint` checks for broken cross-page links, orphan pages with no incoming links, and contradictions — facts that appear in two pages with conflicting claims. Run periodically or set `wikiLintFrequency: "weekly"` for automatic checks.
+  </Step>
+</Steps>
+
+## WIKI_DIFF Format
+
+The LLM writes structured diff blocks following `SCHEMA.md`. The format is explicit and machine-parseable:
+
+```
+WIKI_DIFF_START
+{"action":"upsert","page":"AuthService","section":"Decisions","mode":"append"}
+- 2025-06-15 — Switched from JWT expiry checks to Redis session store for revocability
+WIKI_DIFF_END
+```
+
+```
+WIKI_DIFF_START
+{"action":"create","page":"RateLimiter","title":"Rate Limiter"}
+## Summary
+Sliding-window rate limiter backed by Redis EXPIREAT. One key per user per endpoint.
+
+## Decisions
+- 2025-06-15 — Uses EXPIREAT not EXPIRE to avoid TTL reset under burst traffic
+
+## Sources
+- debugging-session (2025-06-15)
+WIKI_DIFF_END
+```
+
+**Actions:**
+- `create` — new page (requires `title` field; content is the full page markdown)
+- `upsert` — update a specific section in an existing page (`mode: "append"` or `mode: "replace"`)
+- `append` — append content to the end of an existing page
+
+When the LLM detects a contradiction between existing and incoming content, it emits a `WIKI_DIFF_CONFLICTS` block that KiroGraph stores as a pending conflict for review.
+
+## Synthesis Modes
+
+<CardGroup cols={2}>
+  <Card title="agent (default)" icon="sparkles">
+    The IDE's own LLM reads the ingest prompt and writes the WIKI_DIFF. Highest quality output. Consumes API tokens. Works with any AI tool.
+  </Card>
+  <Card title="local" icon="cpu">
+    Sources are queued in SQLite. At `agentStop`, `kirograph wiki synthesize` runs the configured HuggingFace model on-device to produce and apply diffs. Zero API tokens. Same model infrastructure as Watchmen.
+  </Card>
+</CardGroup>
+
+Configure synthesis mode in `.kirograph/config.json`:
+
+```json
+{
+  "enableWiki": true,
+  "wikiSynthesisMode": "local",
+  "wikiLocalModel": "onnx-community/gemma-4-E4B-it-ONNX"
+}
+```
+
+## Conflict Resolution
+
+When an ingest pass produces content that contradicts an existing page claim, KiroGraph stores a `WIKI_DIFF_CONFLICTS` entry with the page slug, section, the existing claim, the incoming claim, and both source dates.
+
+Set `wikiAutoResolveConflicts: true` to resolve conflicts deterministically by source date — the newer source wins. Without this flag, conflicts are listed as pending and surfaced by `kirograph_wiki_lint`.
+
+```json
+{
+  "wikiAutoResolveConflicts": true
+}
+```
+
+## MCP Tools
+
+Wiki requires `enableWiki: true`. The 10 tools add approximately **~319 tokens** of tool descriptions to the model context.
+
+| Tool | Description |
+|---|---|
+| `kirograph_wiki_ingest` | Build ingest prompt from a source text (agent mode) or queue source (local mode) |
+| `kirograph_wiki_apply_diff` | Write LLM-generated `WIKI_DIFF` blocks to SQLite and disk |
+| `kirograph_wiki_lint` | Check for broken links, orphan pages, and contradictions |
+| `kirograph_wiki_search` | Full-text search across wiki pages |
+| `kirograph_wiki_page` | Retrieve a specific wiki page by slug |
+| `kirograph_wiki_list` | List all pages with source counts and last-updated dates |
+| `kirograph_wiki_status` | Page count, source count, oldest/newest page dates |
+| `kirograph_wiki_init` | Initialize wiki directory with `SCHEMA.md` and `MANIFEST.md` |
+| `kirograph_wiki_reindex` | Rebuild SQLite FTS index from disk markdown files |
+| `kirograph_wiki_synthesize` | Run local model synthesis on queued sources (local mode only) |
+
+## Context Enrichment
+
+Relevant wiki pages are automatically included in `kirograph_context` results when their FTS score exceeds `wikiContextThreshold`. Up to `wikiContextLimit` pages are injected per context call.
+
+```json
+{
+  "wikiContextLimit": 3,
+  "wikiContextThreshold": 0.4
+}
+```
+
+## Practical Example
+
+Consider a codebase with an `AuthService` module. Over several sessions the wiki page for it evolves:
+
+**Session 1** — agent ingests the auth module source:
+- `kirograph_wiki_ingest` returns a prompt pointing at the new `AuthService` entity
+- LLM produces a `create` action with a `## Summary` and initial `## Decisions` section
+- `kirograph_wiki_apply_diff` writes `.kirograph/wiki/AuthService.md`
+
+**Session 3** — agent debugs a token expiry bug:
+- `kirograph_wiki_ingest` is called with the debugging session summary
+- LLM produces an `upsert` action adding a bullet to `## Known Issues / Gotchas`
+- Conflict check: the incoming note contradicts an existing decision — conflict stored
+- Agent calls `kirograph_wiki_lint`, sees the conflict, resolves it with `kirograph_wiki_apply_diff`
+
+**Session 7** — agent plans a refactor:
+- `kirograph_context` for the auth refactor task includes the `AuthService` wiki page automatically
+- Agent sees accumulated decisions and gotchas without reading the source history
+
+## Config Reference
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enableWiki` | boolean | `false` | Enable the wiki module |
+| `wikiSynthesisMode` | string | `agent` | `agent` (IDE LLM) or `local` (on-device model) |
+| `wikiLocalModel` | string | `onnx-community/gemma-4-E4B-it-ONNX` | HuggingFace model ID for local synthesis |
+| `wikiSources` | string[] | `["docs/"]` | Glob patterns for auto-ingest sources |
+| `wikiAutoResolveConflicts` | boolean | `false` | Resolve conflicts deterministically by source date |
+| `wikiLintFrequency` | string | `off` | `weekly` (every ~20 sessions) or `off` |
+| `wikiContextLimit` | number | `3` | Max wiki pages injected into `kirograph_context` |
+| `wikiContextThreshold` | number | `0.4` | Min FTS score to include a page in context |

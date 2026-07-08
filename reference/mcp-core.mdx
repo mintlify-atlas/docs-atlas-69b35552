@@ -1,0 +1,417 @@
+---
+title: "Core and Navigation MCP Tools Reference"
+sidebarTitle: "Core Tools"
+description: "Reference for KiroGraph's always-on core tools (kirograph_context, kirograph_exec, kirograph_gain) and navigation tools for symbol search, graph traversal, and file listing."
+---
+
+KiroGraph's core tools are registered unconditionally — they appear in every `tools/list` response regardless of which feature flags are enabled. They cover the most frequent agent workflows: building task context, searching for symbols, tracing call chains, inspecting symbol details, and understanding impact before making changes. Navigation tools (`kirograph_search`, `kirograph_callers`, `kirograph_callees`) require `enableNavigation: true` and `trackCallSites: true` respectively, while status and file tools are bundled with the navigation flag.
+
+---
+
+## Core Tools (always-on)
+
+### `kirograph_context`
+
+The **primary entry point** for every agent task. Given a natural-language task description, it extracts symbol tokens, runs exact lookup + full-text search + vector search against the active semantic engine, resolves imports to their definitions, expands the graph to related symbols, and returns entry points, related nodes, edges, and code snippets — all in a single call.
+
+This is the only tool that invokes the vector engine on every call. For most tasks, one call to `kirograph_context` is enough to orient the agent without any further tool calls.
+
+<ParamField body="task" type="string" required>
+  Natural-language description of the task, bug, or feature to investigate. Supports CamelCase, snake_case, SCREAMING\_SNAKE, and dot.notation symbol tokens.
+</ParamField>
+
+<ParamField body="maxNodes" type="number" default="20">
+  Maximum number of symbols to include in the response.
+</ParamField>
+
+<ParamField body="detail" type="string" default="full">
+  Code verbosity level. Options: `full` (complete source code), `signatures` (signature + docstring, ~70% fewer tokens than `full`), `summary` (file locations only, no code).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Absolute path to the project root. Defaults to the server's current working directory.
+</ParamField>
+
+**How it works:**
+
+<Steps>
+  <Step title="Token extraction">
+    Parses the task string for CamelCase, snake\_case, SCREAMING\_SNAKE, and dot.notation tokens.
+  </Step>
+  <Step title="Exact + FTS + vector search">
+    Runs exact name lookup → SQLite FTS → vector search against the active semantic engine.
+  </Step>
+  <Step title="Import resolution">
+    Resolves imported symbols to their definitions in the graph.
+  </Step>
+  <Step title="Graph expansion">
+    BFS-expands through related edges (`calls`, `imports`, `references`, `type_of`) up to `maxNodes`.
+  </Step>
+  <Step title="Response assembly">
+    Returns entry points, related nodes, edges, code snippets, related memory (if `enableMemory`), related docs (if `enableDocs`), and security warnings (if `enableSecurity`).
+  </Step>
+</Steps>
+
+```json
+{
+  "tool": "kirograph_context",
+  "arguments": {
+    "task": "Add rate limiting to the authentication endpoints",
+    "detail": "signatures",
+    "maxNodes": 15
+  }
+}
+```
+
+---
+
+### `kirograph_exec`
+
+Run a shell command with token-optimized, noise-filtered output. Automatically applies structural filters for git, test runners (Jest, Vitest, pytest), linters (ESLint, Pylint), build tools (webpack, tsc), and Docker — stripping repeated noise lines and compacting progress bars before the output reaches the model.
+
+<ParamField body="command" type="string" required>
+  Shell command to execute.
+</ParamField>
+
+<ParamField body="cwd" type="string" default="project root">
+  Working directory for the command.
+</ParamField>
+
+<ParamField body="level" type="string" default="normal">
+  Compression intensity. Options: `normal` (balanced), `aggressive` (more compact), `ultra` (maximum compression — may drop some detail).
+</ParamField>
+
+<ParamField body="timeout" type="number" default="60">
+  Timeout in seconds before the command is killed.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path used for configuration lookup.
+</ParamField>
+
+<Note>
+  `kirograph_exec` requires `enableShellExec: true` in your config. When the flag is `false`, the tool is not registered and `kirograph_compress` can be used instead for manual compression of command output.
+</Note>
+
+```json
+{
+  "tool": "kirograph_exec",
+  "arguments": {
+    "command": "npm test -- --reporter=verbose",
+    "level": "aggressive"
+  }
+}
+```
+
+---
+
+### `kirograph_gain`
+
+Show token savings statistics accumulated from compressed command outputs and graph tool calls in the current session (or longer periods).
+
+<ParamField body="period" type="string" default="session">
+  Time window to aggregate. Options: `session` (since server start), `today`, `week`, `all`.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+<Note>
+  `kirograph_gain` requires `enableAgentUtils: true`. It reads from the same `TokenTracker` store that `kirograph_exec` writes to.
+</Note>
+
+---
+
+## Navigation Tools (require `enableNavigation: true`)
+
+### `kirograph_search`
+
+Quick symbol search by name. Returns file locations and qualified names only — no source code. Ideal for confirming a symbol exists or discovering all symbols that match a partial name before drilling in with `kirograph_node`.
+
+<ParamField body="query" type="string" required>
+  Symbol name or partial name (e.g. `"auth"`, `"signIn"`, `"UserService"`).
+</ParamField>
+
+<ParamField body="mode" type="string" default="name">
+  Search mode. `name` (default) uses FTS prefix match; `similar` uses fuzzy substring match for broader results.
+</ParamField>
+
+<ParamField body="kind" type="string">
+  Filter by node kind. Options: `function`, `method`, `class`, `interface`, `type_alias`, `variable`, `route`, `component`.
+</ParamField>
+
+<ParamField body="limit" type="number" default="10">
+  Maximum results to return (1–100).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+**How it works:** Exact name match → SQLite FTS → LIKE fallback → vector search only if all three return nothing. Pure graph database in the common case; vector engine only as a last resort.
+
+```json
+{
+  "tool": "kirograph_search",
+  "arguments": {
+    "query": "authenticate",
+    "kind": "function",
+    "limit": 5
+  }
+}
+```
+
+---
+
+### `kirograph_callers`
+
+Find all functions and methods that call a specific symbol. Uses BFS traversal of incoming `call` edges in the graph database — no vector engine involved.
+
+<ParamField body="symbol" type="string" required>
+  Symbol name to find callers for.
+</ParamField>
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return (1–100).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+<Note>
+  Requires `trackCallSites: true` in your config. Call-site edges are only written to the graph during indexing when this flag is enabled.
+</Note>
+
+---
+
+### `kirograph_callees`
+
+Find all functions and methods that a specific symbol calls. Uses BFS traversal of outgoing `call` edges — no vector engine involved.
+
+<ParamField body="symbol" type="string" required>
+  Symbol name to find callees for.
+</ParamField>
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return (1–100).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+```json
+{
+  "tool": "kirograph_callees",
+  "arguments": {
+    "symbol": "UserService.create",
+    "limit": 10
+  }
+}
+```
+
+---
+
+## Status and File Tools (require `enableNavigation: true`)
+
+### `kirograph_node`
+
+Get details about a specific symbol, with configurable depth — from a quick location summary up to the full source code.
+
+<ParamField body="symbol" type="string" required>
+  Symbol name or fully-qualified name to look up.
+</ParamField>
+
+<ParamField body="qualified" type="boolean" default="false">
+  When `true`, treats `symbol` as a fully-qualified name and performs an exact match, bypassing FTS. Use when you have the `qualifiedName` from a prior result.
+</ParamField>
+
+<ParamField body="detail" type="string" default="summary">
+  Output verbosity. Options: `summary` (name + location + qualified name), `signatures` (adds signature and docstring), `full` (adds complete source code).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_impact`
+
+Analyze what code would be affected by changing a symbol. BFS-traverses all incoming edges (`call`, `import`, `reference`, and others) up to the specified depth. Use this before making changes to understand blast radius.
+
+<ParamField body="symbol" type="string" required>
+  Symbol name to analyze impact for.
+</ParamField>
+
+<ParamField body="depth" type="number" default="2">
+  BFS traversal depth. Higher values find more transitive dependents.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+```json
+{
+  "tool": "kirograph_impact",
+  "arguments": {
+    "symbol": "validateToken",
+    "depth": 3
+  }
+}
+```
+
+---
+
+### `kirograph_status`
+
+Check index health and statistics. Returns files indexed, symbol count, edge count, breakdown by kind and language, detected frameworks, database size, semantic engine status, and (if enabled) docs, data, security, and pattern subsystem summaries.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_files`
+
+List the indexed file structure with filtering and multiple output formats. Useful for exploring the project layout and checking which files have been indexed.
+
+<ParamField body="filterPath" type="string">
+  Filter by directory path prefix (e.g. `"src/"`).
+</ParamField>
+
+<ParamField body="pattern" type="string">
+  Filter by glob pattern (e.g. `"**/*.ts"`).
+</ParamField>
+
+<ParamField body="maxDepth" type="number">
+  Limit directory tree depth.
+</ParamField>
+
+<ParamField body="format" type="string" default="tree">
+  Output format. Options: `tree` (visual directory tree), `flat` (one path per line), `grouped` (grouped by directory), `compact` (rtk-style summary with counts).
+</ParamField>
+
+<ParamField body="includeMetadata" type="boolean" default="true">
+  Include language and symbol count annotations alongside each file.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_path`
+
+Find the shortest dependency path between two symbols in the graph. Useful for understanding how two distant parts of the codebase are connected.
+
+<ParamField body="from" type="string" required>
+  Source symbol name.
+</ParamField>
+
+<ParamField body="to" type="string" required>
+  Target symbol name.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+```json
+{
+  "tool": "kirograph_path",
+  "arguments": {
+    "from": "HttpController.handleRequest",
+    "to": "DatabasePool.query"
+  }
+}
+```
+
+---
+
+## Agent Utility Tools (require `enableAgentUtils: true`)
+
+### `kirograph_read`
+
+Read a file with session-level caching. The first read returns full content; subsequent reads of unchanged files return a compact `[cached: file unchanged]` marker (~13 tokens), saving context on repeated reads. Supports multiple modes for targeted extraction.
+
+<ParamField body="path" type="string" required>
+  File path (absolute or relative to project root).
+</ParamField>
+
+<ParamField body="mode" type="string" default="full">
+  Read mode. Options: `full` (entire file), `map` (structure overview), `signatures` (function signatures only), `diff` (changes since last read), `lines` (line range, requires `start`/`end`), `imports`, `exports`.
+</ParamField>
+
+<ParamField body="start" type="number">
+  Start line for `lines` mode.
+</ParamField>
+
+<ParamField body="end" type="number">
+  End line for `lines` mode.
+</ParamField>
+
+<ParamField body="noCache" type="boolean" default="false">
+  Force a fresh filesystem read, bypassing the session cache.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_retrieve`
+
+Cached Content Retrieval (CCR). Returns the full content stored in the session cache, or reads and caches the file if not yet seen. Use after `kirograph_read` returns a `[cached: file unchanged]` marker to recover the actual content without a redundant filesystem read.
+
+<ParamField body="path" type="string" required>
+  File path to retrieve (absolute or relative to project root).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_budget`
+
+Show current session context budget usage: tokens consumed, remaining budget, and utilization percentage.
+
+<ParamField body="reset" type="boolean" default="false">
+  Reset session budget counters.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## General Compression Tool (requires `enableGeneralCompression: true`)
+
+### `kirograph_compress`
+
+On-demand compression for arbitrary text before it reaches the model. Routes to one of two engines depending on whether `command` is provided. Reports inline savings: `[42% tokens saved | 1800→1044 | rtk:git:aggressive]`.
+
+<ParamField body="text" type="string" required>
+  Text to compress.
+</ParamField>
+
+<ParamField body="command" type="string">
+  Shell command that produced the text (e.g. `"git log"`, `"npm test"`). When provided, activates rtk-style structural filters. Omit for prose — uses caveman grammar instead.
+</ParamField>
+
+<ParamField body="level" type="string" default="full">
+  Compression intensity. Options: `lite` / `normal` (light), `full` / `aggressive` (medium), `ultra` (maximum).
+</ParamField>
+
+<Tip>
+  Use `kirograph_compress` when command output arrived outside of `kirograph_exec` — for example, from a tool that runs commands directly. For source code, prefer `detail: "signatures"` on `kirograph_context` instead, since compressing source code may break identifiers or whitespace-sensitive syntax.
+</Tip>

@@ -1,0 +1,403 @@
+---
+title: "Security MCP Tools Reference"
+sidebarTitle: "Security Tools"
+description: "Reference for KiroGraph's 15 security MCP tools: vulnerability scanning, reachability analysis, attack surface mapping, secret detection, SAST, SBOM, and SARIF export."
+---
+
+KiroGraph's security tools turn the code knowledge graph into a reachability-aware vulnerability scanner. Rather than reporting every CVE that appears in your `package.json`, they trace actual call paths from HTTP routes and exported entry points to vulnerable dependencies — surfacing only the vulnerabilities your code can actually reach. All tools in this group require `enableSecurity: true` **and** `enableArchitecture: true` in your config. Pattern-based SAST tools additionally require `enablePatterns: true`.
+
+<Note>
+  Security analysis is run during indexing (`kirograph index`). If you enable
+  `enableSecurity` on an existing project, run `kirograph index` once to
+  populate the security graph before calling any of these tools.
+</Note>
+
+---
+
+## Vulnerability Tools
+
+### `kirograph_security`
+
+Security posture overview: total dependencies indexed, vulnerability counts, reachability verdict breakdown, suppressed CVE count, and stale data warnings. Use this as the starting point before drilling into specific vulnerabilities.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+```json
+{
+  "tool": "kirograph_security",
+  "arguments": {}
+}
+```
+
+---
+
+### `kirograph_vulns`
+
+List vulnerabilities with reachability verdicts, severity scores, EPSS scores, and fix suggestions. Results are ranked by risk score (severity × reachability). Suppressed CVEs are excluded by default.
+
+<ParamField body="severity" type="string">
+  Filter by severity band. Options: `critical` (CVSS ≥ 9.0), `high` (7.0–8.9), `medium` (4.0–6.9), `low` (0.1–3.9).
+</ParamField>
+
+<ParamField body="verdict" type="string">
+  Filter by reachability verdict. Options: `affected`, `not_affected`, `under_investigation`.
+</ParamField>
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="refresh" type="boolean" default="false">
+  Trigger fresh enrichment from configured vulnerability databases (e.g. OSV) before listing. Set to `true` when vulnerability data may be stale.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+**Example response:**
+
+```
+CVE-2023-44270 (7.5 HIGH) — postcss
+  Verdict: affected
+  Paths: 2 entry points reach this dependency
+  Layers: api, service
+  💡 Fix: npm install postcss@8.4.31
+```
+
+---
+
+### `kirograph_reachability`
+
+Deep reachability analysis for a specific CVE or dependency. Returns the verdict, the shortest call path from each entry point that reaches the vulnerable code, unresolved symbols (if any), and an impact summary with affected layers and distinct path count.
+
+<ParamField body="target" type="string" required>
+  CVE identifier (e.g. `"CVE-2024-1234"`) or package name (e.g. `"lodash"`).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+**Example response:**
+
+```
+CVE-2024-1234 — lodash@4.17.20
+  Verdict: affected
+  Reaching entry points: 3
+  Paths:
+    POST /api/users → UserService.create → validateInput → lodash
+    GET /api/users → UserService.list → formatResponse → lodash
+    POST /api/auth → AuthController.login → sanitize → lodash
+  Affected layers: api, service
+  Distinct paths: 5
+```
+
+---
+
+### `kirograph_vuln_add`
+
+Manually register a CVE against an indexed dependency. Creates a `Vulnerability_Node` linked to the matching `Dependency_Node`. Useful for private or internal advisories not available in public databases.
+
+<ParamField body="cveId" type="string" required>
+  CVE identifier (e.g. `"CVE-2024-9999"`).
+</ParamField>
+
+<ParamField body="package" type="string" required>
+  Package name — must match an existing indexed dependency exactly.
+</ParamField>
+
+<ParamField body="severity" type="number">
+  CVSS v3.1 base score (0.0–10.0).
+</ParamField>
+
+<ParamField body="summary" type="string">
+  Human-readable description (truncated to 500 characters).
+</ParamField>
+
+<ParamField body="fixedVersion" type="string">
+  Version that fixes the vulnerability.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_vuln_suppress`
+
+Suppress a CVE from all vulnerability reports. Suppressed CVEs are excluded from `kirograph_vulns`, `kirograph_security`, and SBOM/VEX exports. Suppressions can optionally expire on a set date.
+
+<ParamField body="cveId" type="string" required>
+  CVE identifier to suppress (e.g. `"CVE-2024-1234"`).
+</ParamField>
+
+<ParamField body="reason" type="string">
+  Reason for suppression (recommended for audit trail).
+</ParamField>
+
+<ParamField body="expires" type="string">
+  Expiry date in ISO format (e.g. `"2026-12-31"`). After this date the suppression is automatically removed.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_remediation`
+
+SLA tracking per CVE. Thresholds: `critical` = 7 days, `high` = 30 days, `medium` = 90 days. Returns days open, days with fix available, and SLA status for each vulnerability.
+
+<ParamField body="overdueOnly" type="boolean" default="false">
+  Return only CVEs that have breached their SLA threshold.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Dependency and Supply Chain Tools
+
+### `kirograph_staleness`
+
+Check dependency freshness against the latest published versions. Identifies packages that are significantly behind, sorted by staleness score. Supports npm, PyPI, crates.io, RubyGems, and Packagist registries.
+
+<ParamField body="threshold" type="number" default="0.3">
+  Minimum staleness score (0.0–1.0) to include in results.
+</ParamField>
+
+<ParamField body="refresh" type="boolean" default="false">
+  Re-query registries for the latest version data before listing.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_licenses`
+
+List dependency licenses and check them against the configured `securityLicensePolicy`. Returns each package's license and flags policy violations (deny/warn).
+
+<ParamField body="policy" type="boolean" default="false">
+  When `true`, return only packages that violate the configured deny or warn policy.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_manifest`
+
+Parse and display all manifest dependencies (package.json, Cargo.toml, go.mod, requirements.txt, etc.) across the workspace. Supports multi-ecosystem monorepos.
+
+<ParamField body="package" type="string">
+  Package name or path for a focused view (partial match accepted).
+</ParamField>
+
+<ParamField body="ecosystem" type="string">
+  Filter by ecosystem (e.g. `"npm"`, `"cargo"`, `"go"`, `"python"`).
+</ParamField>
+
+<ParamField body="showDrift" type="boolean" default="false">
+  Highlight packages declared in multiple manifests with different versions.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_supply_chain`
+
+Supply chain health assessment: OpenSSF Scorecard scores, maintainer counts, abandoned package detection (&gt;365 days inactive), and new package risk (&lt;30 days old). Uses external APIs — results are cached to avoid repeated requests.
+
+<ParamField body="threshold" type="string">
+  Minimum risk level to include. Options: `low`, `medium`, `high`, `critical`.
+</ParamField>
+
+<ParamField body="refresh" type="boolean" default="false">
+  Re-query external sources before returning results.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_dep_confusion`
+
+Detect dependency confusion attack vectors: internal packages whose names exist in public registries. Also detects typosquatting candidates using Levenshtein distance ≤ 2 from popular package names.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Attack Surface and Flow Analysis
+
+### `kirograph_attack_surface`
+
+Map all HTTP routes to reachable vulnerable dependencies. Each result shows the route name, exposure level (public/authenticated/internal), hop count from route to vulnerable dependency, and an overall risk score.
+
+<ParamField body="limit" type="number" default="20">
+  Maximum routes to return.
+</ParamField>
+
+<ParamField body="publicOnly" type="boolean" default="false">
+  Return only public-facing (unauthenticated) routes.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_security_flows`
+
+SAST-lite: detect insecure data flows in your code. Identifies SQL injection, dangerous `eval`/`exec`, unsafe deserialization, path traversal, and weak cryptographic usage. Each finding is tagged with an OWASP Top 10 (2021) category.
+
+<ParamField body="type" type="string" default="all">
+  Filter by flow type. Options: `sql`, `eval`, `deserialization`, `path-traversal`, `crypto`, `all`.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_secrets`
+
+Scan for hardcoded secrets — 14 secret types including AWS keys, GitHub tokens, database URLs, JWTs, private keys, and more. Each detected secret is enriched with a call-graph blast radius showing which HTTP entry points can reach it.
+
+<ParamField body="includeTests" type="boolean" default="false">
+  Include test files in the scan.
+</ParamField>
+
+<ParamField body="severity" type="string">
+  Filter by severity. Options: `critical`, `high`, `medium`, `low`.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Export Tools
+
+### `kirograph_sbom`
+
+Generate a CycloneDX 1.5 SBOM JSON document containing all project dependencies as components with `purl` identifiers, scope classification, and dependency relationships. Suitable for submission to software composition analysis pipelines.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_vex`
+
+Generate a CycloneDX 1.5 VEX (Vulnerability Exploitability eXchange) JSON document. Maps graph reachability verdicts to CycloneDX VEX states: `affected` → `"affected"`, `not_affected` → `"not_affected"` (justification: `"code_not_reachable"`), `under_investigation` → `"under_investigation"`.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+<Tip>
+  Pair `kirograph_sbom` and `kirograph_vex` to produce a complete CycloneDX
+  1.5 BOM+VEX bundle for compliance submissions or CI artifact uploads.
+</Tip>
+
+---
+
+## Pattern-Based SAST (require `enablePatterns: true`)
+
+Pattern tools use `@ast-grep/napi` for structural AST matching. They only appear in the MCP tool list when **both** `enablePatterns: true` **and** the `@ast-grep/napi` package is installed. When either condition is false, the tools are not registered.
+
+### `kirograph_pattern_coverage`
+
+OWASP Top 10 coverage report: which OWASP categories are covered by active rules and how many matches were found per category.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_pattern_save_baseline`
+
+Save the current pattern match counts as a named baseline. Use before a sprint or release to track new findings introduced by changes.
+
+<ParamField body="label" type="string" default="default">
+  Baseline label.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_pattern_diff`
+
+Diff current pattern matches against a saved baseline. Returns newly introduced findings and resolved findings since the baseline was captured.
+
+<ParamField body="label" type="string" default="default">
+  Baseline label to diff against.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+```json
+{
+  "tool": "kirograph_pattern_diff",
+  "arguments": { "label": "sprint-42-start" }
+}
+```
+
+---
+
+### `kirograph_live_search`
+
+Run a live AST structural pattern search across the indexed codebase using `@ast-grep/napi`. Finds code patterns that cannot be expressed as symbol names or semantic queries — for example, all `eval($X)` calls regardless of context.
+
+<ParamField body="pattern" type="string" required>
+  `ast-grep` inline pattern (e.g. `"eval($X)"`, `"console.log($ARGS)"`).
+</ParamField>
+
+<ParamField body="language" type="string" required>
+  Language to search. Options: `javascript`, `typescript`, `python`, `go`, `rust`, `java`, and others supported by `ast-grep`.
+</ParamField>
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return (max 100).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+<Warning>
+  `kirograph_live_search` is a dynamic tool — it is NOT included in the static
+  `KIROGRAPH_TOOL_NAMES` list and therefore NOT added to the Kiro
+  `autoApprove` array automatically. Add it manually if you want auto-approval
+  in Kiro.
+</Warning>

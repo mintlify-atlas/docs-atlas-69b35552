@@ -1,0 +1,262 @@
+---
+title: "CLI Indexing Commands: index, sync, status, files"
+sidebarTitle: "Indexing Commands"
+description: "Reference for KiroGraph CLI indexing commands: full re-index, incremental sync, dirty markers, index status, and file structure listing with all flags."
+---
+
+KiroGraph's indexing layer parses your source files with tree-sitter and writes a SQLite graph to `.kirograph/kirograph.db`. The commands on this page control when and how that graph is built and kept current, from a full re-index down to a single-file sync triggered by a git hook. The short `kg` alias works for every command shown here.
+
+<Tip>
+  Run `kirograph status` at the start of a coding session to confirm the index is healthy and up to date before asking the AI agent to do graph-based analysis.
+</Tip>
+
+---
+
+## `kirograph index`
+
+Performs a full parse and index of every source file in the project. Results are written to `.kirograph/kirograph.db` as a directed graph of symbols (nodes) and relationships (edges). If `enableEmbeddings: true` is set in `config.json`, the semantic layer generates vector embeddings for each symbol at this stage.
+
+Without `--force`, files whose content hash has not changed since the last index are skipped, making re-runs fast.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Re-index every file regardless of its content hash |
+
+### Examples
+
+```bash
+# Index the current directory
+kirograph index
+
+# Index a specific project path
+kirograph index /workspace/myproject
+
+# Force a clean rebuild, ignoring the hash cache
+kirograph index --force
+
+# Short alias
+kg index --force
+```
+
+On completion the CLI prints a summary line:
+
+```
+  ✓ 342 files, 8 741 symbols, 24 388 edges (4 312ms)
+```
+
+---
+
+## `kirograph sync`
+
+Performs an incremental sync that only re-parses files that have changed since the last index run. Content hashing means a file is skipped if its bytes are identical to what was indexed, even if its mtime changed. This makes `sync` safe to run frequently — from a git hook, a CI step, or a file-watcher.
+
+### Flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--files <files...>` | | Sync a specific set of files instead of scanning the whole project |
+| `--quiet` | `-q` | Suppress all progress output (used in hooks where output is noise) |
+| `--progress` | | Verbose per-file output; errors are printed inline |
+
+### Examples
+
+```bash
+# Sync all changed files in the current project
+kirograph sync
+
+# Sync a specific project path
+kirograph sync /workspace/myproject
+
+# Sync only two files
+kirograph sync --files src/auth.ts src/utils.ts
+
+# Silent sync — no output (used in Kiro hooks)
+kirograph sync --quiet
+
+# Verbose per-file progress
+kirograph sync --progress
+
+# Short alias
+kg sync
+```
+
+---
+
+## `kirograph sync-if-dirty`
+
+Syncs the project only if a dirty marker file (`.kirograph/dirty`) is present. The dirty marker is written by `kirograph mark-dirty` or automatically by Kiro hooks when files are saved. This avoids unnecessary database writes when the index is already up to date.
+
+### Flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--quiet` | `-q` | Suppress output |
+
+### Examples
+
+```bash
+# Sync only when the dirty marker exists
+kirograph sync-if-dirty
+
+kirograph sync-if-dirty /workspace/myproject
+
+# Quiet mode — used in Kiro post-save hooks
+kirograph sync-if-dirty --quiet
+```
+
+<Note>
+  The Kiro IDE hook `kirograph-sync-if-dirty.json` calls `kirograph sync-if-dirty --quiet` on file events. This is the primary mechanism that keeps the graph current while you edit.
+</Note>
+
+---
+
+## `kirograph mark-dirty`
+
+Writes a dirty marker to `.kirograph/dirty` without performing a sync. Useful in pre-commit hooks, CI pipelines, or any workflow where you want to flag that a sync is needed but defer the actual work.
+
+### Examples
+
+```bash
+# Mark the current project as dirty
+kirograph mark-dirty
+
+kirograph mark-dirty /workspace/myproject
+```
+
+The marker is consumed and deleted the next time `kirograph sync-if-dirty` runs.
+
+---
+
+## `kirograph status`
+
+Shows index statistics for the project: file count, symbol count, edge count, a by-kind breakdown, detected frameworks, DB size on disk, the active semantic engine, and whether a dirty marker is pending.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--integrations` | Switch to an integration view showing detected and configured platforms |
+
+### Examples
+
+```bash
+# Show index stats for the current project
+kirograph status
+
+kirograph status /workspace/myproject
+
+# Show configured tool integrations instead of index stats
+kirograph status --integrations
+
+# Short alias
+kg status
+```
+
+Example output:
+
+```
+  Graph
+  Files      342
+  Symbols    8 741
+  Edges      24 388
+
+  Frameworks  react, typescript
+
+  By kind
+  function      3 214
+  method        1 892
+  class           407
+  …
+```
+
+---
+
+## `kirograph unlock`
+
+Force-releases a stale lock file at `.kirograph/kirograph.lock`. Use this after a crash or an interrupted `kirograph index` run that left the lock behind.
+
+### Examples
+
+```bash
+kirograph unlock
+
+kirograph unlock /workspace/myproject
+```
+
+<Warning>
+  Only run `kirograph unlock` when you are sure no other process (such as the Kiro MCP server) is actively using the database. Releasing a live lock can corrupt an in-progress write.
+</Warning>
+
+If another process is holding the database open you will see this error when indexing:
+
+```
+  ✖ KiroGraph crashed: SQLite WASM runtime aborted.
+  Most likely cause: another process (e.g. the Kiro MCP server) is
+  holding the database open while indexing is running.
+```
+
+The fix: close Kiro IDE (or disable the MCP server), run `kirograph unlock`, then retry `kirograph index`.
+
+---
+
+## `kirograph files`
+
+Shows the project's indexed file tree as built from the graph — only files that have been parsed and stored are listed. Useful for confirming that the indexer picked up the files you expected and for exploring large codebases by directory or language.
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--format <fmt>` | `tree` \| `flat` \| `grouped` | `tree` |
+| `--filter <dir>` | Filter output to files whose path starts with this prefix | — |
+| `--pattern <glob>` | Filter by glob pattern | — |
+| `--max-depth <n>` | Limit tree depth | unlimited |
+| `--no-metadata` | Hide per-file language and symbol count annotations | false |
+| `--json` | Output the raw file tree as JSON | false |
+
+### Examples
+
+```bash
+# Default tree view
+kirograph files
+
+# Flat list of every indexed file
+kirograph files --format flat
+
+# Files grouped by language
+kirograph files --format grouped
+
+# Only files under src/components/
+kirograph files --filter src/components
+
+# Only test files
+kirograph files --pattern "**/*.test.ts"
+
+# Limit depth for a high-level overview
+kirograph files --max-depth 2
+
+# Strip language / symbol counts from the output
+kirograph files --no-metadata
+
+# Machine-readable JSON
+kirograph files --json
+
+# Short alias
+kg files --format grouped
+```
+
+---
+
+## Command summary
+
+| Command | Key flags | Default path |
+|---------|-----------|--------------|
+| `kirograph index [path]` | `--force` | `cwd` |
+| `kirograph sync [path]` | `--files`, `--quiet`, `--progress` | `cwd` |
+| `kirograph sync-if-dirty [path]` | `--quiet` | `cwd` |
+| `kirograph mark-dirty [path]` | — | `cwd` |
+| `kirograph status [path]` | `--integrations` | `cwd` |
+| `kirograph unlock [path]` | — | `cwd` |
+| `kirograph files [path]` | `--format`, `--filter`, `--pattern`, `--max-depth`, `--no-metadata`, `--json` | `cwd` |

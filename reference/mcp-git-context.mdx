@@ -1,0 +1,280 @@
+---
+title: "Git Context MCP Tools Reference"
+sidebarTitle: "Git Context"
+description: "Reference for KiroGraph's git context MCP tools: diff context, commit context, PR context, test mapping, affected tests, hotspots, and staleness analysis."
+---
+
+KiroGraph's git context tools bridge the gap between your version history and the semantic code graph. They enrich `git diff`, `git log`, and branch comparisons with the symbol-level context that matters to an AI agent: which symbols changed, who calls them, and which test files are affected. All tools in this group require `enableGitContext: true` in `.kirograph/config.json`.
+
+<Note>
+  Git context tools execute `git` shell commands against the project repository. The project root must be a valid git repository with `git` installed and available on `PATH`.
+</Note>
+
+---
+
+## `kirograph_diff_context`
+
+Get the semantic context for the current working-tree diff. Returns the set of symbols touched by unstaged (or staged) changes, each annotated with its callers and callees so the agent immediately understands blast radius without extra tool calls.
+
+<ParamField body="staged" type="boolean">
+  When `true`, analyse staged changes (`git diff --cached`) instead of unstaged changes (`git diff`). Defaults to `false`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: semantic context for unstaged changes"
+{
+  "tool": "kirograph_diff_context",
+  "arguments": { "staged": false }
+}
+```
+
+```text title="Example output"
+Unstaged changes — 3 affected symbol(s):
+
+  fn `processPayment` (modified) — src/payments/processor.ts:42
+    callers: `handleCheckout`, `retryQueue`
+    calls:   `validateCard`, `chargeStripe`, `sendReceipt`
+
+  fn `validateCard` (modified) — src/payments/validator.ts:18
+    callers: `processPayment`
+```
+
+---
+
+## `kirograph_commit_context`
+
+Inspect the staged changes that are ready to commit. Returns staged file paths, a diff summary, and the full symbol-level context for each changed symbol.
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: review staged changes before committing"
+{
+  "tool": "kirograph_commit_context",
+  "arguments": {}
+}
+```
+
+```text title="Example output"
+Staged files (2):
+  src/payments/processor.ts
+  src/payments/validator.ts
+
+Diff summary:
+ 2 files changed, 14 insertions(+), 3 deletions(-)
+
+Affected symbols (2):
+  fn `processPayment` (modified) — src/payments/processor.ts:42
+    callers: `handleCheckout`, `retryQueue`
+```
+
+---
+
+## `kirograph_pr_context`
+
+Compute the semantic diff between two branches — ideal for generating PR descriptions or reviewing a feature branch before merge. Returns every symbol that changed between `base` and `head`, with callers and callees.
+
+<ParamField body="base" type="string" required>
+  Base branch or ref (e.g. `main`, `origin/main`, a commit SHA).
+</ParamField>
+
+<ParamField body="head" type="string">
+  Head branch or ref to compare against. Defaults to `HEAD`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: semantic diff for a feature branch"
+{
+  "tool": "kirograph_pr_context",
+  "arguments": {
+    "base": "main",
+    "head": "feature/multi-currency"
+  }
+}
+```
+
+---
+
+## `kirograph_changelog`
+
+Generate a human-readable changelog between two refs — combines a conventional `git log` with the full symbol-level semantic diff. Useful for release notes and sprint summaries.
+
+<ParamField body="ref1" type="string" required>
+  Start ref (older). E.g. `v1.2.0` or a commit SHA.
+</ParamField>
+
+<ParamField body="ref2" type="string">
+  End ref (newer). Defaults to `HEAD`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: changelog since last tag"
+{
+  "tool": "kirograph_changelog",
+  "arguments": {
+    "ref1": "v1.3.0",
+    "ref2": "HEAD"
+  }
+}
+```
+
+---
+
+## `kirograph_test_map`
+
+Map source symbols to their test files, or find exported symbols that have no test coverage at all. Pass a `symbol` name for targeted lookup, or omit it for a project-wide uncovered-symbol report.
+
+<ParamField body="symbol" type="string">
+  Symbol name to look up. When provided, returns the test files that reference this symbol. When omitted, returns all exported symbols with no test coverage.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+<CodeGroup>
+```json title="Targeted: test files for a symbol"
+{
+  "tool": "kirograph_test_map",
+  "arguments": { "symbol": "processPayment" }
+}
+```
+
+```json title="Project-wide: uncovered exported symbols"
+{
+  "tool": "kirograph_test_map",
+  "arguments": {}
+}
+```
+</CodeGroup>
+
+```text title="Example output (targeted)"
+Test files covering `processPayment` (2):
+
+  tests/unit/payments/processor.test.ts
+  tests/integration/checkout.test.ts
+```
+
+---
+
+## `kirograph_flows`
+
+Trace execution flows through the call graph. Without `entryPoint`, returns the most critical flows detected project-wide. With `entryPoint`, traces the outgoing call chain from that specific symbol.
+
+<ParamField body="entryPoint" type="string">
+  Symbol name to trace from. When omitted, detects all significant flows project-wide.
+</ParamField>
+
+<ParamField body="maxDepth" type="number">
+  Maximum hop depth for the trace. Defaults to `10`.
+</ParamField>
+
+<ParamField body="maxFlows" type="number">
+  Maximum flows to return when `entryPoint` is omitted. Defaults to `10`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: trace from a specific entry point"
+{
+  "tool": "kirograph_flows",
+  "arguments": {
+    "entryPoint": "handleCheckout",
+    "maxDepth": 8
+  }
+}
+```
+
+---
+
+## `kirograph_test_coverage`
+
+Parse `lcov.info` or Istanbul `coverage-final.json` and report per-file line coverage. Automatically searches for coverage files in the project root and common output directories.
+
+<ParamField body="sortBy" type="string">
+  Sort order: `asc` (lowest coverage first, default) or `desc` (highest first).
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum number of files to show. Defaults to `30`, capped at `200`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: find the least-covered files"
+{
+  "tool": "kirograph_test_coverage",
+  "arguments": { "sortBy": "asc", "limit": 20 }
+}
+```
+
+```text title="Example output"
+## Test Coverage Report (from coverage/lcov.info)
+Overall: 74.3%  (8420/11330 lines)
+Sorted by coverage ASC (lowest first), showing top 20
+
+  12.5%  src/payments/refund-edge-cases.ts (3/24 lines)
+  18.0%  src/notifications/sms-provider.ts (9/50 lines)
+  ...
+```
+
+---
+
+## CI Integration Example
+
+Use `kirograph_diff_context` in CI to understand the blast radius of a PR before tests run, and feed the result to the agent for automated impact analysis.
+
+<Steps>
+  <Step title="Run semantic diff in CI">
+    In a GitHub Actions step, call `kirograph_diff_context` with the staged changes from the feature branch:
+
+    ```yaml title=".github/workflows/review.yml"
+    - name: Semantic diff
+      run: |
+        kirograph index
+        kirograph mcp call kirograph_diff_context \
+          --staged false \
+          --projectPath ${{ github.workspace }}
+    ```
+  </Step>
+
+  <Step title="Identify affected test files">
+    Use `kirograph_test_map` to map changed symbols to their test files:
+
+    ```json
+    {
+      "tool": "kirograph_test_map",
+      "arguments": { "symbol": "processPayment" }
+    }
+    ```
+  </Step>
+
+  <Step title="Check coverage for changed files">
+    After running tests, use `kirograph_test_coverage` to confirm coverage did not regress:
+
+    ```json
+    {
+      "tool": "kirograph_test_coverage",
+      "arguments": { "sortBy": "asc", "limit": 10 }
+    }
+    ```
+  </Step>
+</Steps>
+
+<Tip>
+  Combine `kirograph_pr_context` with `kirograph_mem_search` to check whether the symbols being modified carry any known errors or architectural decisions in memory before the agent starts writing code.
+</Tip>

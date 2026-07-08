@@ -1,0 +1,190 @@
+---
+title: "How KiroGraph Indexes and Queries Your Codebase"
+sidebarTitle: "How It Works"
+description: "KiroGraph uses tree-sitter AST parsing to build a SQLite knowledge graph from your source code, then exposes it via MCP tools for instant symbol lookups and graph traversal."
+---
+
+KiroGraph turns your source code into a queryable graph. Every `kirograph index` or `kirograph sync` run parses your files into abstract syntax trees, extracts the symbols and relationships within them, and stores the result in a local SQLite database. This page explains each layer of that process — from structural parsing through semantic embeddings to how MCP tools consume the graph at query time.
+
+## Indexing Layers
+
+Indexing is divided into five layers. The structural layer is always active. Every other layer is opt-in and is enabled through a flag in `.kirograph/config.json`.
+
+### Structural Indexing (Always On)
+
+The structural layer is the foundation of KiroGraph. It runs on every `kirograph index` and `kirograph sync` call and has no external dependencies beyond Node.js.
+
+<Note>
+  KiroGraph bundles tree-sitter WASM grammars for all 33+ supported languages. No native compilation step is required for structural indexing — the WASM runtime ships with the package and works on any platform Node.js supports.
+</Note>
+
+Each source file is parsed into an AST. KiroGraph then walks the tree and emits:
+
+- **Nodes** — one record per symbol (function, class, route, component, etc.)
+- **Edges** — one record per relationship between symbols (calls, imports, extends, etc.)
+
+Both are written to `kirograph.db`. Nodes include a full-text search index (FTS5) so symbol names can be found instantly without a full table scan.
+
+#### Node Kinds
+
+| Kind | Description |
+|---|---|
+| `function` | Standalone function declarations |
+| `method` | Class and object methods |
+| `class` | Class declarations |
+| `interface` | TypeScript / Java / C# interfaces |
+| `type_alias` | TypeScript `type` declarations |
+| `enum` | Enumeration declarations |
+| `variable` | Module-level variable and constant declarations |
+| `constant` | Explicitly constant bindings |
+| `route` | HTTP route handlers (Express, FastAPI, Rails, etc.) |
+| `component` | React, Vue, Svelte, and similar UI components |
+| `module` | File-level module nodes |
+| `namespace` | Namespace and package declarations |
+| `decorator` | Class and method decorators |
+| `property` | Class property declarations |
+| `constructor` | Class constructor methods |
+| `getter` / `setter` | Accessor methods |
+| `arrow_function` | Arrow function expressions |
+| `lambda` | Lambda expressions (Python, Java, etc.) |
+| `dependency` | Entries detected in manifest files (package.json, etc.) |
+| `vulnerability` | CVEs linked to dependency nodes (Security module) |
+
+#### Edge Kinds
+
+Edges capture the structural relationships between nodes:
+
+`calls` · `imports` · `exports` · `extends` · `implements` · `contains` · `references` · `instantiates` · `overrides` · `decorates` · `type_of` · `returns`
+
+Each edge record stores the source node, target node, file location, and an optional call-site list when `trackCallSites: true` is set in your config.
+
+### Semantic Indexing (opt-in: `enableEmbeddings: true`)
+
+When semantic indexing is enabled, KiroGraph generates 768-dimensional vector embeddings for every embeddable symbol (`function`, `method`, `class`, `interface`, `type_alias`, `component`, `module`) using the `nomic-ai/nomic-embed-text-v1.5` model. The model (~130 MB) is downloaded once and cached in `~/.kirograph/models/`.
+
+Embeddings power natural-language search in `kirograph_context` and act as a fallback in `kirograph_search`. You choose where embeddings are stored via the `semanticEngine` config option:
+
+| Engine | Store location | Search type | Extra dependency |
+|---|---|---|---|
+| `cosine` *(default)* | `kirograph.db` (`vectors` table) | Exact cosine, linear scan | none |
+| `turboquant` | `kirograph.db` (compressed) | ANN, 20–30× compression | `turboquant-js` |
+| `turbovec` | `kirograph.db` (compressed, SIMD) | ANN, Rust/SIMD | napi-rs native addon |
+| `sqlite-vec` | `.kirograph/vec.db` | ANN, approximate | `better-sqlite3`, `sqlite-vec` |
+| `orama` | `.kirograph/orama.json` | Hybrid FTS + vector | `@orama/orama` |
+| `pglite` | `.kirograph/pglite/` | Hybrid FTS + vector, exact | `@electric-sql/pglite` |
+| `lancedb` | `.kirograph/lancedb/` | ANN, approximate | `@lancedb/lancedb` |
+| `qdrant` | `.kirograph/qdrant/` | ANN (HNSW) | `qdrant-local` |
+| `typesense` | `.kirograph/typesense/` | ANN (HNSW) | `typesense` |
+
+```json
+{
+  "enableEmbeddings": true,
+  "semanticEngine": "pglite"
+}
+```
+
+### Architecture Analysis (opt-in: `enableArchitecture: true`)
+
+When architecture analysis is enabled, KiroGraph detects the high-level structure of your project: packages, architectural layers (api, service, repository, etc.), and the edges between them. It then computes coupling metrics — afferent coupling (Ca), efferent coupling (Ce), and instability — for each package.
+
+Results are stored in `arch_*` tables inside `kirograph.db` and exposed through dedicated MCP tools (`kirograph_architecture`, `kirograph_coupling`) and CLI commands (`kirograph architecture`, `kirograph coupling`).
+
+```json
+{
+  "enableArchitecture": true
+}
+```
+
+<Note>
+  `enableSecurity: true` automatically enables `enableArchitecture` as well, because security reachability analysis depends on the package and layer graph.
+</Note>
+
+### Memory (opt-in: `enableMemory: true`)
+
+The memory layer stores persistent observations across sessions — decisions, errors, patterns, architecture notes. Observations are:
+
+- **Compressed** with caveman grammar when caveman mode is on — deterministic, zero LLM tokens spent on write
+- **Symbol-linked** — identifiers in observation text are matched against the graph and stored as stable `qualified_name` references
+- **Embedded** with your configured semantic engine — enabling natural-language search over past observations
+- **Deduplicated** — SHA-256 content hashing prevents storing the same observation twice
+
+Memory surfaces automatically in `kirograph_context` and `kirograph_impact` results when past observations are linked to the symbols being queried. Zero LLM tokens on write; roughly 150–350 tokens per search.
+
+```json
+{
+  "enableMemory": true
+}
+```
+
+### Documentation Indexing (opt-in: `enableDocs: true`)
+
+The docs layer indexes project documentation by heading hierarchy. Instead of reading entire files, the agent retrieves exactly the section it needs via a stable section ID. Nine format parsers are supported: Markdown, MDX, reStructuredText, AsciiDoc, RDoc, Org-mode, HTML, plain text, and OpenAPI/Swagger. Code↔docs cross-references are resolved automatically using backtick references, CamelCase identifiers, and snake_case patterns found in doc text.
+
+Token savings: 92–97% compared to reading full documentation files.
+
+```json
+{
+  "enableDocs": true
+}
+```
+
+### Data Indexing (opt-in: `enableData: true`)
+
+The data layer indexes tabular data files that live alongside your code: CSV, TSV, JSONL, JSON, Excel, Parquet, and PDF. Filters, aggregations, and joins run server-side in SQLite — only results enter the context window. PDF pages are indexed as rows with `content` (markdown), `needs_ocr`, `has_tables`, and `has_columns` columns.
+
+Token savings: 95–99% compared to reading raw data files.
+
+```json
+{
+  "enableData": true
+}
+```
+
+## The Graph Model
+
+Every symbol stored in KiroGraph has the following fields:
+
+| Field | Description |
+|---|---|
+| `id` | Stable internal integer ID |
+| `name` | Short symbol name (e.g. `authenticate`) |
+| `qualified_name` | Fully-qualified name including module path |
+| `file` | Repo-relative file path |
+| `line` / `end_line` | Source location |
+| `kind` | One of the 26 node kinds listed above |
+| `signature` | Function signature or type declaration text |
+| `docstring` | Extracted doc comment (when `extractDocstrings: true`) |
+| `embedding` | Float32 vector (when `enableEmbeddings: true`) |
+
+Edges are stored with `source_id`, `target_id`, `kind`, `file`, and `line`. When `trackCallSites: true` is enabled, each `calls` edge also stores the exact call-site line numbers as a JSON array.
+
+## Incremental Sync
+
+After the initial `kirograph index`, you rarely need to re-index from scratch. `kirograph sync` keeps the graph current by processing only files that have changed.
+
+The sync algorithm works as follows:
+
+1. **Content hashing** — KiroGraph stores a SHA-256 hash of each indexed file. On sync, it re-hashes every file and compares against the stored value.
+2. **Dirty marking** — Changed files are marked dirty. The Kiro `agentStop` hook also marks files dirty as the agent edits them.
+3. **Targeted re-parse** — Only dirty files are re-parsed. Their old nodes and edges are removed and replaced with the new ones extracted from the updated AST.
+4. **Index rebuild** — FTS and vector indexes are updated incrementally.
+
+This means sync time scales with the number of changed files, not total project size.
+
+```bash
+kirograph sync          # process all dirty files
+kirograph sync-if-dirty # no-op when nothing is dirty (used in CI)
+```
+
+## How MCP Tools Use the Graph
+
+When Kiro calls `kirograph_context("fix auth bug")`, the server executes a multi-stage retrieval pipeline:
+
+1. **Token extraction** — The query string is tokenized and candidate symbol names are identified.
+2. **FTS search** — The SQLite FTS5 index is queried for exact and fuzzy matches on symbol names.
+3. **Vector search** — If embeddings are enabled, the query is also embedded and the nearest neighbors in the vector store are retrieved.
+4. **Graph expansion** — The top matching nodes are expanded one or two hops through the graph: callers, callees, type hierarchy parents, and imported modules are all pulled in.
+5. **Memory injection** — If the memory module is enabled, the most relevant past observations linked to the matched symbols are appended.
+6. **Response assembly** — The collected symbols, edges, and observations are serialized into a compact token-budget-aware response and returned to the agent.
+
+The entire pipeline runs against the local SQLite database — no network calls, no external services.

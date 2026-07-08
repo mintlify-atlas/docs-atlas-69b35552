@@ -1,47 +1,147 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with KiroGraph in 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Install KiroGraph, connect it to Kiro, index your project, and make your first graph query — all in under 5 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This guide walks you from zero to a live `kirograph_context` call inside Kiro IDE. You will install the CLI, run the interactive installer to wire up Kiro, index your project, and verify that the MCP tool is available. The whole flow takes about five minutes for a medium-sized codebase.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+<Step title="Install KiroGraph">
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+KiroGraph is not yet published to the npm registry. Install it from source with the four-command flow below.
 
-    ```bash
-    your-cli start
-    ```
-  </Step>
-</Steps>
+<CodeGroup>
+
+```bash Source (recommended)
+git clone https://github.com/davide-desio-eleva/kirograph.git
+cd kirograph
+npm install
+npm run build
+sudo npm install -g .
+```
+
+```bash Verify
+kirograph --version
+```
+
+</CodeGroup>
+
+After the global install, both `kirograph` and the short alias `kg` are available on your `PATH`. Run `kirograph --version` to confirm.
+
+</Step>
+
+<Step title="Run the Installer">
+
+`cd` into the project you want to index, then run the installer. It auto-detects Kiro and any other MCP-capable tools that are present and walks you through an interactive configuration menu.
+
+```bash
+cd your-project
+kirograph install
+```
+
+You can also target a specific tool or skip prompts entirely:
+
+```bash
+kirograph install --target kiro    # Kiro only
+kirograph install --target cursor  # Cursor only
+kirograph install --all            # all detected platforms, no prompts
+```
+
+The installer will ask you to choose:
+
+- Which Kiro IDE version you are running (`0.x` beta or `1.x` stable)
+- Whether to enable embeddings and which semantic engine to use
+- Which opt-in modules to activate (Memory, Docs, Architecture, Security, etc.)
+- Any folders to exclude from indexing (e.g. `src/generated`, `vendor`)
+
+When it finishes, the following files are written to your project:
+
+| File | Purpose |
+|---|---|
+| `.kiro/settings/mcp.json` | Registers the KiroGraph MCP server with Kiro IDE and CLI |
+| `.kiro/hooks/*.json` | Auto-sync hooks — keeps the index fresh after each agent session |
+| `.kiro/steering/kirograph.md` | Teaches Kiro how and when to use the graph tools |
+| `.kiro/agents/kirograph.json` | Custom agent config for Kiro CLI |
+| `.kirograph/config.json` | Your KiroGraph configuration (edit any time) |
+
+</Step>
+
+<Step title="Index Your Project">
+
+If you skipped the optional index step inside the installer, run it now:
+
+```bash
+kirograph index
+```
+
+KiroGraph scans every file that matches your configuration's `include`/`exclude` patterns, parses each one with tree-sitter into an AST, extracts symbols and relationships, and writes the result to a local SQLite database. You will see a live progress indicator as files are processed.
+
+```
+  Indexing...
+  ✓ Indexed 312 files, 4,821 symbols, 11,204 edges
+```
+
+For incremental updates after your first full index, use `sync` instead — it re-processes only files whose content has changed:
+
+```bash
+kirograph sync
+```
 
 <Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+  You do not need to run `kirograph sync` manually during normal Kiro sessions. The `agentStop` hook installed by the installer triggers an incremental sync automatically at the end of every agent session, so the graph stays current without any manual steps.
+</Tip>
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+</Step>
+
+<Step title="Make Your First Query">
+
+You can query the graph directly from the CLI before opening Kiro. Two commands are useful for a first look:
+
+```bash
+# Natural-language context for a task — same query Kiro would make
+kirograph context "fix auth bug"
+
+# Exact or fuzzy symbol lookup filtered by kind
+kirograph query authenticate --kind function
+```
+
+`kirograph context` returns the symbols most relevant to the task description, their callers and callees, and the estimated impact radius. `kirograph query` performs a direct symbol search — useful for looking up a specific function, class, or route.
+
+</Step>
+
+<Step title="Open Kiro and Test">
+
+Restart Kiro IDE so it picks up the new MCP server entry in `.kiro/settings/mcp.json`. Once restarted, open the agent panel and try a prompt that would normally require many file reads:
+
+```
+What functions call authenticate, and what would break if I changed its signature?
+```
+
+Kiro will call `kirograph_context` or `kirograph_impact` instead of reading files one by one. You can watch the MCP tool calls in Kiro's tool-call log to confirm the graph is being used.
+
+</Step>
+
+</Steps>
+
+## What Happens on Index
+
+The `kirograph index` command creates a `.kirograph/` directory at the root of your project. Here is what lives inside it:
+
+| Path | Contents |
+|---|---|
+| `.kirograph/config.json` | Your KiroGraph configuration |
+| `.kirograph/kirograph.db` | The main SQLite knowledge graph (nodes, edges, FTS index) |
+| `.kirograph/vec.db` | Vector store — only present when `semanticEngine: "sqlite-vec"` |
+| `.kirograph/orama.json` | Orama hybrid index — only when `semanticEngine: "orama"` |
+| `.kirograph/pglite/` | PGlite vector store — only when `semanticEngine: "pglite"` |
+| `.kirograph/lancedb/` | LanceDB store — only when `semanticEngine: "lancedb"` |
+| `.kirograph/snapshots/` | Architecture snapshots saved with `kirograph snapshot` |
+| `.kirograph/export/` | Browser dashboard output from `kirograph export` |
+
+The main database (`kirograph.db`) contains everything needed for structural graph traversal — symbol nodes, call/import/type edges, and full-text search indexes — with no external service required.
+
+<Tip>
+  Add `.kirograph/` to your `.gitignore`. The database is generated from your source and can be fully rebuilt with `kirograph index` at any time. Committing it adds unnecessary binary churn to your repository history.
 </Tip>

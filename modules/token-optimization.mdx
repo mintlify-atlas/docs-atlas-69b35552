@@ -1,0 +1,238 @@
+---
+title: "Token Optimization: Compression and File Caching"
+sidebarTitle: "Token Optimization"
+description: "KiroGraph cuts token usage via shell output compression (60–90% savings), prose compression, and cached file reads that return a ~13-token marker for unchanged files."
+---
+
+Every token consumed by an AI agent has a cost — in latency, in API spend, and in the shrinking space available for code and reasoning. KiroGraph ships four complementary token reduction systems: shell output compression, prose compression (Caveman mode), on-demand text compression, and file read caching. Each operates independently and can be enabled or tuned without affecting the others.
+
+## Shell Compression — `kirograph_exec`
+
+`kirograph_exec` runs a shell command and passes its output through a token-optimized filter before returning it to the agent. The filter is selected by command family — git, test runners, linters, build tools, Docker, package managers, AWS, GitHub CLI — and strips noise lines, deduplicates repeated entries, and groups results.
+
+```json
+{
+  "enableShellExec": true,
+  "shellCompressionLevel": "normal"
+}
+```
+
+### Example
+
+```json
+{
+  "tool": "kirograph_exec",
+  "command": "git log --oneline -20",
+  "level": "aggressive"
+}
+```
+
+The raw output of a git log can easily run 400–800 tokens. After filtering: typically 60–120 tokens.
+
+### Command Families
+
+| Family | Examples |
+|---|---|
+| git | `git log`, `git diff`, `git status`, `git blame` |
+| test | `jest`, `vitest`, `pytest`, `go test`, `cargo test` |
+| lint | `eslint`, `tsc`, `pylint`, `rubocop` |
+| files | `ls`, `find`, `tree` |
+| docker | `docker build`, `docker logs`, `docker ps` |
+| package | `npm install`, `pip install`, `cargo build` |
+| aws | `aws` CLI output |
+| github | `gh` CLI output |
+| misc | `grep`, `diff`, `curl`, `prisma`, Playwright |
+| generic | Everything else — deduplication and noise removal |
+
+### Compression Levels
+
+| Level | Effect |
+|---|---|
+| `normal` | Removes noise lines, deduplicates, groups summaries |
+| `aggressive` | Additional truncation of repeated patterns and verbose stack frames |
+| `ultra` | Maximum compression — retains only the signal lines |
+
+### `kirograph_exec` Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `command` | string | required | Shell command to execute |
+| `cwd` | string | project root | Working directory |
+| `level` | string | `normal` | Compression level: `normal`, `aggressive`, `ultra` |
+| `timeout` | number | `60` | Timeout in seconds |
+| `projectPath` | string | cwd | Project root path |
+
+### Token Analytics
+
+`kirograph_gain` reports cumulative savings from both shell compression (measured exactly) and graph tools (estimated heuristically).
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `period` | string | `session` | Time period: `session`, `today`, `week`, `all` |
+| `projectPath` | string | cwd | Project root path |
+
+---
+
+## Caveman Mode — Prose Compression
+
+Caveman mode compresses agent prose output — explanations, summaries, reasoning — by stripping filler words, articles, hedging phrases, and verbose constructs. It does not touch code blocks, file paths, URLs, or identifiers.
+
+```json
+{
+  "cavemanMode": "full"
+}
+```
+
+### Modes
+
+| Mode | Effect |
+|---|---|
+| `off` | No prose compression (default) |
+| `lite` | Removes obvious filler words and softening phrases |
+| `full` | Removes articles, hedges, and verbose constructions |
+| `ultra` | Aggressively abbreviates common phrases in addition to `full` |
+
+Caveman mode is applied via multi-level steering injection — no tool call overhead. The agent's explanations arrive compressed without any change to tool usage patterns.
+
+---
+
+## General-Purpose Compression — `kirograph_compress`
+
+`kirograph_compress` is an on-demand compression tool for arbitrary text that arrives outside of `kirograph_exec`. Enable it with `enableGeneralCompression: true`.
+
+```json
+{
+  "enableGeneralCompression": true
+}
+```
+
+The tool routes to one of two compression engines depending on whether `command` is provided:
+
+<CardGroup cols={2}>
+  <Card title="rtk-style filters (with command)" icon="terminal">
+    Pattern-matched per command family — same filters as `kirograph_exec`. Use when the text is the output of a known shell command that was run outside of `kirograph_exec`.
+  </Card>
+  <Card title="Caveman grammar (without command)" icon="text">
+    Prose compression for observations, summaries, and freeform text. Preserves code blocks, paths, URLs, and identifiers.
+  </Card>
+</CardGroup>
+
+### `kirograph_compress` Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `text` | string | required | Text to compress |
+| `command` | string | — | Shell command that produced the output. Activates rtk-style filters. Omit for prose. |
+| `level` | string | `full` | Intensity: `lite` / `normal` (light), `full` / `aggressive` (medium), `ultra` (maximum) |
+
+The response includes inline savings: `[42% tokens saved | 1800→1044 | rtk:git:aggressive]`.
+
+**When to use:**
+- Text arrived from a tool that runs commands directly (not via `kirograph_exec`)
+- Compressing an observation before storing it to memory
+- Comparing compressed vs original before a large follow-up tool call
+
+**When not to use:**
+- Commands run via `kirograph_exec` — already compressed automatically
+- Agent prose — use `cavemanMode` in config instead (zero tool-call overhead)
+- Source code — may break identifiers or whitespace-sensitive syntax
+
+---
+
+## File Read Caching — `kirograph_read` and `kirograph_retrieve`
+
+`kirograph_read` is a caching file reader that returns a compact `[cached: file unchanged]` marker (~13 tokens) on subsequent reads of files whose content has not changed. Enable it with `enableAgentUtils: true`.
+
+```json
+{
+  "enableAgentUtils": true
+}
+```
+
+### `kirograph_read` Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `path` | string | required | File path (absolute or relative to project root) |
+| `mode` | string | `full` | Read mode — see table below |
+| `start` | number | — | Start line (for `lines` mode) |
+| `end` | number | — | End line (for `lines` mode) |
+| `noCache` | boolean | `false` | Force a fresh read, bypass cache |
+| `projectPath` | string | cwd | Project root path |
+
+### Read Modes
+
+| Mode | Returns |
+|---|---|
+| `full` | Complete file content |
+| `map` | Structure overview — classes, functions, exports with line numbers |
+| `signatures` | Function and method signatures only (no bodies) |
+| `diff` | Changes since the last `kirograph_read` of this file |
+| `lines` | A specific line range (`start`–`end`) |
+| `imports` | Import statements only |
+| `exports` | Export declarations only |
+
+Use `signatures` or `map` for large files when the agent only needs to understand the structure, not read every line.
+
+### Cached Content Retrieval — `kirograph_retrieve`
+
+`kirograph_retrieve` (CCR) recovers the full content stored in the session cache without performing a filesystem read. Use it after `kirograph_read` returns a `[cached: file unchanged]` marker to get the actual content back without redundant I/O.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `path` | string | required | File path to retrieve |
+| `projectPath` | string | cwd | Project root path |
+
+Prefix-stable cache markers enable KV cache hits on conversation context — the model sees the same token sequence for unchanged files, improving KV cache utilization on repeated calls.
+
+### `kirograph_budget` — Session Context Budget
+
+`kirograph_budget` shows per-session token consumption, remaining budget, and utilization percentage. Useful for agents managing context window pressure during long sessions.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `reset` | boolean | `false` | Reset session budget counters |
+| `projectPath` | string | cwd | Project root path |
+
+---
+
+## MCP Tool Token Budget Table
+
+Each enabled flag adds tool descriptions to the model context on every MCP call. Total with all flags enabled: **126 tools · ~6,240 tokens**.
+
+<Tip>
+  Enable only the modules your project needs. A typical setup (`enableMemory`, `enableDocs`, `enableAgentUtils`, `enableShellExec`) costs about **~1,300 tokens** — well under the point where tool descriptions start competing with your context budget.
+</Tip>
+
+| Flag | Tools | ~Tokens |
+|---|---:|---:|
+| core (always-on) | 3 | ~170 |
+| `enableNavigation` | 3 | ~120 |
+| `enableMemory` | 16 | ~746 |
+| `enableSecurity` | 15 | ~675 |
+| `enableData` | 10 | ~519 |
+| `enableWiki` | 10 | ~319 |
+| `enableCodeHealth` | 25 | ~935 |
+| `enableDocs` | 5 | ~241 |
+| `enableAgentUtils` | 4 | ~278 |
+| `enableArchitecture` | 5 | ~205 |
+| `enableWatchmen` | 3 | ~140 |
+| `enablePatterns` | 3 | ~93 |
+| `trackCallSites` | 2 | ~84 |
+| `enableGitContext` | 7 | ~410 |
+| `enableComplexity` | 5 | ~660 |
+| `enableEditPrimitives` | 5 | ~280 |
+| `enableBranch` | 3 | ~300 |
+| `enableShellExec` | 1 | ~71 |
+| `enableGeneralCompression` | 1 | ~68 |
+| **Total** | **126** | **~6,240** |
+
+## Config Reference
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `shellCompressionLevel` | string | `off` | Shell compression level: `off`, `normal`, `aggressive`, `ultra` |
+| `cavemanMode` | string | `off` | Prose compression mode: `off`, `lite`, `full`, `ultra` |
+| `enableShellExec` | boolean | `false` | Enable the `kirograph_exec` shell tool |
+| `enableGeneralCompression` | boolean | `false` | Enable the `kirograph_compress` on-demand compression tool |
+| `enableAgentUtils` | boolean | `true` | Enable `kirograph_read`, `kirograph_retrieve`, and `kirograph_budget` |

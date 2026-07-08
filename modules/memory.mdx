@@ -1,0 +1,225 @@
+---
+title: "Persistent Memory: Cross-Session Agent Observations"
+sidebarTitle: "Memory"
+description: "KiroGraph-Mem stores decisions, errors, and patterns linked to code symbols across sessions — searchable, conflict-aware, zero LLM tokens on write."
+---
+
+KiroGraph-Mem gives AI agents a persistent, searchable memory layer that survives session boundaries. Every observation — a debugging decision, an architectural pattern, a known error — is compressed, linked to the code symbols it mentions, embedded for semantic search, and deduplicated via SHA-256. Future sessions surface relevant observations automatically inside `kirograph_context` and `kirograph_impact` results, without the agent needing to re-read source files.
+
+## Enabling Memory
+
+Add `enableMemory` to `.kirograph/config.json`:
+
+```json
+{
+  "enableMemory": true
+}
+```
+
+Once enabled, KiroGraph applies the memory schema to `kirograph.db` and registers all 16 memory tools with the MCP server.
+
+## How It Works
+
+<Steps>
+  <Step title="Content arrives">
+    The agent calls `kirograph_mem_store`. KiroGraph strips any `<private>…</private>` blocks, then checks exclude patterns (`memoryExcludePatterns`).
+  </Step>
+  <Step title="Compression (if caveman mode is on)">
+    The observation text is compressed with the caveman grammar — a deterministic, rule-based prose compressor. Zero LLM tokens spent. The original text is preserved alongside as `content_raw` when `memoryKeepRaw: true`.
+  </Step>
+  <Step title="Deduplication">
+    A SHA-256 hash of the (compressed) content is computed. If an identical observation already exists in the database it is silently skipped.
+  </Step>
+  <Step title="Symbol linking">
+    Identifiers in the observation text — CamelCase, snake_case, dot.notation — are matched against the code graph. Matching symbols are stored as stable `qualified_name` references in `mem_symbol_links`.
+  </Step>
+  <Step title="Embedding">
+    The observation is embedded with the configured semantic engine (`nomic-ai/nomic-embed-text-v1.5` by default). Enables natural-language search via `kirograph_mem_search`.
+  </Step>
+  <Step title="Auto-surfacing">
+    When any subsequent call hits `kirograph_context` or `kirograph_impact`, KiroGraph queries linked observations for the symbols in scope. Matching observations above `memoryContextThreshold` are included — up to `memoryContextLimit` per call.
+  </Step>
+</Steps>
+
+<Note>
+  Write cost: ~0 extra LLM tokens. Search cost: ~150–350 tokens per query — compared to ~2,000–5,000 tokens to re-discover the same context by reading source files.
+</Note>
+
+## Observation Kinds
+
+Every observation is tagged with a `kind`. Use the kind that best describes the nature of the information:
+
+| Kind | When to use |
+|---|---|
+| `decision` | An architectural or implementation choice and its rationale |
+| `error` | A bug, failure mode, or trap encountered during debugging |
+| `pattern` | A recurring implementation pattern worth reinforcing |
+| `architecture` | A high-level structural note about the system |
+| `summary` | A synthesis of multiple observations (used by Watchmen) |
+| `note` | Anything that does not fit the above categories |
+
+## MCP Tools
+
+Memory requires `enableMemory: true`. The 16 tools add approximately **~746 tokens** of tool descriptions to the model context.
+
+<AccordionGroup>
+  <Accordion title="kirograph_mem_store — store an observation">
+    Stores an observation in project memory.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `content` | string | required | Observation text |
+    | `kind` | string | `note` | `decision`, `error`, `pattern`, `architecture`, `summary`, `note` |
+    | `topicKey` | string | — | Stable slug for deduplication, e.g. `architecture/auth-model` |
+    | `reviewAfter` | number | — | Unix timestamp — surfaces observation in `kirograph_mem_review` after this date |
+    | `projectPath` | string | cwd | Project root path |
+
+    Normal response: `{ "id": "obs_abc123" }`. When Watchmen is enabled and the threshold is reached, the response also includes `watchmenReady: true` with synthesis instructions.
+  </Accordion>
+  <Accordion title="kirograph_mem_search — search observations">
+    Hybrid FTS5 + vector search over all stored observations.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `query` | string | required | Natural-language search query |
+    | `kind` | string | — | Filter by kind |
+    | `limit` | number | `10` | Max results |
+    | `sessionId` | string | — | Narrow to a specific session |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_mem_timeline — chronological view">
+    Lists recent sessions and their observations in chronological order.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `limit` | number | `5` | Number of sessions to show |
+    | `sessionId` | string | — | Show observations for a specific session only |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_mem_status — memory stats">
+    Returns the health of the memory subsystem: session count, observation count, embedding coverage, model mismatch detection, and pending conflict count.
+  </Accordion>
+  <Accordion title="kirograph_mem_compare — conflict detection">
+    Establishes a typed relation between two observations. Accepts observation IDs or `topic_key` values. Creates a `pending` relation for agent review.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `observationA` | string | required | First observation ID or `topic_key` |
+    | `observationB` | string | required | Second observation ID or `topic_key` |
+    | `relation` | string | required | `supersedes`, `conflicts_with`, `compatible`, `scoped`, `related`, `not_conflict` |
+    | `confidence` | number | `1.0` | Confidence score 0.0–1.0 |
+    | `reason` | string | — | Explanation for the relation |
+  </Accordion>
+  <Accordion title="kirograph_mem_judge — finalize a conflict">
+    Finalizes a pending conflict relation — confirm, revise, or dismiss it. Changes `judgment_status` from `pending` to `judged`.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `relationId` | string | required | Relation ID from `kirograph_mem_compare` |
+    | `relation` | string | required | Final relation type |
+    | `confidence` | number | required | Final confidence 0.0–1.0 |
+    | `reason` | string | — | Reasoning for the judgment |
+  </Accordion>
+  <Accordion title="kirograph_mem_review — stale observations">
+    Lists observations past their `review_after` date — stale facts the agent should re-evaluate, update, or supersede. Reports days overdue per observation.
+  </Accordion>
+  <Accordion title="Other memory tools">
+    | Tool | Purpose |
+    |---|---|
+    | `kirograph_mem_mark_reviewed` | Clear an observation's `review_after` date |
+    | `kirograph_mem_capture` | Extract structured observations from a freeform text block with `## Key Learnings`, `## Decisions`, etc. sections |
+    | `kirograph_mem_save_prompt` | Save the current user prompt to session memory |
+    | `kirograph_mem_suggest_topic_key` | Get a deterministic slug for an observation based on kind + title |
+    | `kirograph_mem_conflicts_scan` | Scan recent observations for potential conflicts via FTS similarity |
+    | `kirograph_mem_conflicts_list` | List pending conflict relations |
+    | `kirograph_mem_conflicts_ignore` | Dismiss a pending conflict relation |
+    | `kirograph_mem_lint` | Check for stale links, model mismatches, and stale sessions |
+    | `kirograph_mem_prune` | Remove observations older than a given duration |
+  </Accordion>
+</AccordionGroup>
+
+## Practical Workflow
+
+The following shows a typical session cycle — an agent debugs a problem, stores what it learned, and future sessions benefit automatically.
+
+<Steps>
+  <Step title="Session 1: Agent debugs a rate-limit issue">
+    After fixing a bug in `RateLimiter.check`, the agent stores its finding:
+
+    ```json
+    {
+      "tool": "kirograph_mem_store",
+      "content": "RateLimiter.check uses Redis EXPIRE not EXPIREAT — TTL resets on each write under burst traffic. Fixed by switching to EXPIREAT with absolute deadline.",
+      "kind": "error"
+    }
+    ```
+
+    KiroGraph links the observation to the `RateLimiter.check` symbol and embeds it.
+  </Step>
+  <Step title="Session 2: Agent works on AuthController">
+    The agent calls `kirograph_context` for a task touching the auth flow. `RateLimiter.check` appears in the impact graph. KiroGraph automatically appends the stored observation to the context result — no extra tool call needed.
+  </Step>
+  <Step title="Ongoing: conflict detection">
+    When two sessions produce conflicting notes about the same component, `kirograph_mem_conflicts_scan` surfaces them. The agent calls `kirograph_mem_compare` to classify the relation, then `kirograph_mem_judge` to finalize it.
+  </Step>
+</Steps>
+
+## Watchmen — Automatic Brief Synthesis
+
+Watchmen is an opt-in synthesis layer that accumulates memory observations and automatically distills them into workspace briefs and skill files. It requires `enableMemory: true`.
+
+```json
+{
+  "enableMemory": true,
+  "enableWatchmen": true,
+  "watchmenThreshold": 5,
+  "watchmenSynthesisMode": "local",
+  "watchmenLocalModel": "onnx-community/gemma-4-E4B-it-ONNX"
+}
+```
+
+After each `kirograph_mem_store` call, KiroGraph counts non-summary observations since the last `kind: 'summary'`. When the count reaches `watchmenThreshold`, the response includes a `watchmenReady: true` flag with `targetFiles`, `skillTargetDir`, and synthesis instructions.
+
+**Synthesis modes:**
+
+<CardGroup cols={2}>
+  <Card title="local (default)" icon="cpu">
+    Runs `onnx-community/gemma-4-E4B-it-ONNX` on-device via `@huggingface/transformers`. No API key, no external calls. Works for all AI tools.
+  </Card>
+  <Card title="agent (Kiro only)" icon="sparkles">
+    Delegates synthesis to the active AI agent via the `askAgent` hook. Higher output quality but consumes API tokens. Requires Kiro IDE.
+  </Card>
+</CardGroup>
+
+**What Watchmen writes:**
+
+- **Workspace brief** — a `## KiroGraph Watchmen` section upserted into the tool's project memory file (`.kiro/steering/kirograph-watchmen.md` for Kiro, `CLAUDE.md` for Claude Code, `AGENTS.md` for others).
+- **Skill files** (Kiro only) — individual `inclusion: manual` steering files at `.kiro/steering/watchmen-<slug>.md` for recurring procedures. Files from previous synthesis runs are pruned when patterns change.
+- **Summary observation** — a `kind: 'summary'` observation stored to reset the counter.
+
+<Warning>
+  **Watchmen is experimental.** Local synthesis quality varies significantly with the model and hardware. The default model (`gemma-4-E4B-it-ONNX`) requires a **~3–4 GB one-time download** and **~3–5 GB RAM at inference**. Expect 8–15 seconds on Apple Silicon M1+ and 30–60 seconds on Intel CPU. Use `watchmenSynthesisMode: "agent"` on Kiro for best results.
+</Warning>
+
+## Hook-Based Capture
+
+KiroGraph installs a `kirograph-mem-capture.kiro.hook` that fires at `agentStop`. It prompts the agent to review the session and store structured observations using `## Key Learnings`, `## Decisions`, `## Observations`, or `## Key Changes` headings — which `kirograph_mem_capture` then parses into typed observations automatically.
+
+This means observations are stored at the end of every session with no manual intervention, building up the memory store progressively over time.
+
+## Config Reference
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enableMemory` | boolean | `false` | Enable persistent cross-session memory |
+| `memorySearchAlpha` | number | `0.5` | Blend weight for hybrid search (0 = FTS only, 1 = vector only) |
+| `memoryKeepRaw` | boolean | `true` | Store original text alongside compressed version |
+| `memoryMaxObservations` | number | `10000` | Max observations before auto-pruning oldest |
+| `memorySessionTimeout` | number | `3600000` | Session timeout in ms (1 hour) |
+| `memoryContextLimit` | number | `3` | Max observations surfaced in `kirograph_context` |
+| `memoryContextThreshold` | number | `0.3` | Min relevance score to surface in context |
+| `memoryExcludePatterns` | string[] | `[]` | Glob patterns for files to exclude from symbol linking |
+| `enableWatchmen` | boolean | `false` | Enable Watchmen brief synthesis (requires `enableMemory`) |
+| `watchmenThreshold` | number | `5` | Observations since last synthesis before `watchmenReady` fires |
+| `watchmenSynthesisMode` | string | `local` | `local` (on-device model) or `agent` (Kiro only) |
+| `watchmenLocalModel` | string | `onnx-community/gemma-4-E4B-it-ONNX` | HuggingFace model ID for local synthesis |

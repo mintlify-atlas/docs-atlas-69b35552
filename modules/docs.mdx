@@ -1,0 +1,154 @@
+---
+title: "Documentation Indexing for Section-Level Retrieval"
+sidebarTitle: "Docs"
+description: "KiroGraph-Doc indexes Markdown, MDX, RST, AsciiDoc, and OpenAPI files at the section level, enabling 92–97% token savings over full-file reads."
+---
+
+KiroGraph-Doc indexes project documentation by heading hierarchy and section structure. Instead of reading entire doc files — which can be thousands of tokens each — agents retrieve exactly the section they need via a stable section ID. This produces 92–97% token savings compared to full-file reads, tracked cumulatively in `kirograph_gain`.
+
+The module is inspired by [jDocMunch-MCP](https://github.com/jgravelle/jdocmunch-mcp) by J. Gravelle.
+
+## Enabling Docs
+
+Add `enableDocs` to `.kirograph/config.json`:
+
+```json
+{
+  "enableDocs": true
+}
+```
+
+On the next `kirograph index` or `kirograph sync`, KiroGraph scans for documentation files matching `docsInclude` patterns and indexes them section by section.
+
+## Supported Formats
+
+KiroGraph-Doc ships nine format parsers:
+
+| Format | Extensions |
+|---|---|
+| Markdown | `.md`, `.cheatmd` |
+| MDX | `.mdx` |
+| reStructuredText | `.rst` |
+| AsciiDoc | `.adoc`, `.asciidoc` |
+| RDoc | `.rdoc` |
+| Org-mode | `.org` |
+| HTML | `.html` (in `docs/`) |
+| Plain text | `.txt` (in `docs/`) |
+| OpenAPI / Swagger | `.yaml`, `.json` (schema detection) |
+
+## How It Works
+
+<Steps>
+  <Step title="File scanning">
+    KiroGraph walks the project tree, matching files against `docsInclude` and `docsExclude` globs. Files larger than `docsMaxFileSize` are skipped.
+  </Step>
+  <Step title="Parsing">
+    Each file is parsed by its format handler into a section tree. Sections are split at heading boundaries — the heading text becomes the section `title`, and the content below (up to the next heading) becomes the body. Children are nested headings.
+  </Step>
+  <Step title="Stable section IDs">
+    Each section receives a stable ID derived from the file path, the ancestor heading chain, the section title slug, and the heading level:
+
+    ```
+    docs/api/authentication.md::overview/token-formats#3
+    ```
+
+    IDs are stable across re-indexing as long as the heading structure does not change.
+  </Step>
+  <Step title="Incremental indexing">
+    A SHA-256 hash of the full file is stored on the first root-level section. Re-indexing skips files whose hash has not changed.
+  </Step>
+  <Step title="Code ↔ docs cross-references">
+    When `docsLinkCode: true`, KiroGraph scans section content for backtick references, CamelCase identifiers, and snake_case patterns and resolves them against the code graph. Links are stored in `doc_code_refs` and exposed via `kirograph_docs_refs`.
+  </Step>
+  <Step title="FTS and embeddings">
+    Each section is indexed in a SQLite FTS5 table for keyword search. If `enableEmbeddings: true`, sections are also embedded for semantic search.
+  </Step>
+</Steps>
+
+## MCP Tools
+
+Documentation tools require `enableDocs: true`. The 5 tools add approximately **~241 tokens** of tool descriptions to the model context.
+
+<AccordionGroup>
+  <Accordion title="kirograph_docs_toc — table of contents">
+    Returns the table of contents for a specific file or for all indexed documentation.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `file` | string | — | Filter to a specific doc file. Omit for project-wide TOC. |
+    | `tree` | boolean | `false` | Return a nested tree structure instead of a flat list |
+    | `projectPath` | string | cwd | Project root path |
+
+    Returns section IDs, titles, levels, and summaries — the starting point for targeted section retrieval.
+  </Accordion>
+  <Accordion title="kirograph_docs_search — search doc sections">
+    Search documentation sections by query text.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `query` | string | required | Search query (natural language or keywords) |
+    | `file` | string | — | Narrow search to a specific doc file |
+    | `limit` | number | `10` | Max results |
+    | `projectPath` | string | cwd | Project root path |
+
+    Searches are independent from code symbol search — FTS5 over section titles and summaries.
+  </Accordion>
+  <Accordion title="kirograph_docs_section — retrieve a section">
+    Fetches the full content of a single documentation section by its stable ID.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `id` | string | required | Section ID from `kirograph_docs_toc` or `kirograph_docs_search` |
+    | `context` | boolean | `false` | Include ancestor heading chain and child section summaries |
+    | `projectPath` | string | cwd | Project root path |
+
+    Returns only the bytes for that section — not the entire file.
+  </Accordion>
+  <Accordion title="kirograph_docs_outline — file heading hierarchy">
+    Returns the complete heading hierarchy for a single documentation file.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `file` | string | required | Relative path to the doc file |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_docs_refs — code ↔ docs cross-references">
+    Finds code symbols referenced by a doc section, or doc sections that reference a code symbol.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `sectionId` | string | — | Doc section ID (find code symbols it references) |
+    | `nodeId` | string | — | Code symbol qualified name (find doc sections that reference it) |
+    | `projectPath` | string | cwd | Project root path |
+
+    Requires `docsLinkCode: true` for cross-references to be populated.
+  </Accordion>
+</AccordionGroup>
+
+## Context Enrichment
+
+Set `docsContextLimit` to a positive number to have relevant doc sections automatically injected into `kirograph_context` results. Sections are included when their relevance score exceeds `docsContextThreshold`.
+
+```json
+{
+  "docsContextLimit": 3,
+  "docsContextThreshold": 0.5
+}
+```
+
+<Tip>
+  Set `docsContextLimit: 3` to get the three most relevant doc sections included in every `kirograph_context` call. This costs almost nothing — section summaries are typically 1–2 sentences — and frequently surfaces API constraints or usage notes the agent would otherwise miss.
+</Tip>
+
+## Config Reference
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enableDocs` | boolean | `false` | Enable documentation indexing |
+| `docsInclude` | string[] | `["**/*.md", "**/*.mdx", ...]` | Glob patterns for doc files to include |
+| `docsExclude` | string[] | `["node_modules/**", ...]` | Glob patterns to exclude |
+| `docsLinkCode` | boolean | `true` | Auto-link doc sections to code symbols |
+| `docsContextLimit` | number | `0` | Max doc sections in `kirograph_context` (0 = disabled) |
+| `docsContextThreshold` | number | `0.5` | Min relevance score to include a section in context |
+| `docsMaxFileSize` | number | `1048576` | Max doc file size in bytes (1 MB) |
+| `docsSummarization` | string | `first-sentence` | Summary strategy: `embedding`, `first-sentence`, or `off` |

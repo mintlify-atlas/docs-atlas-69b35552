@@ -1,0 +1,185 @@
+---
+title: "Tabular Data Querying with KiroGraph-Data"
+sidebarTitle: "Data"
+description: "KiroGraph-Data queries CSV, JSON, Excel, Parquet, and PDF files with server-side filters, aggregations, and joins in SQLite — no data leaves your machine."
+---
+
+KiroGraph-Data indexes tabular data files that live alongside your code — test fixtures, seed datasets, configuration tables, sample exports — and lets AI agents query them without ever reading the raw files. Filters, aggregations, and joins run server-side in SQLite. Only the result rows enter the context window, producing 95–99% token savings over naive full-file reads.
+
+The module is inspired by [jDataMunch-MCP](https://github.com/jgravelle/jdatamunch-mcp) by J. Gravelle.
+
+## Enabling Data
+
+Add `enableData` to `.kirograph/config.json`:
+
+```json
+{
+  "enableData": true
+}
+```
+
+On the next `kirograph index` or `kirograph sync`, KiroGraph scans for data files matching `dataInclude` patterns, streams them through the appropriate parser, profiles every column, and stores rows in per-dataset SQLite tables.
+
+## Supported Formats
+
+| Format | Extensions | Extra dependency |
+|---|---|---|
+| CSV / TSV | `.csv`, `.tsv` | none (built-in) |
+| JSONL / NDJSON | `.jsonl`, `.ndjson` | none (built-in) |
+| JSON array | `.json` (in `data/`) | none (built-in) |
+| Excel | `.xlsx`, `.xls` | `xlsx` npm package |
+| Parquet | `.parquet` | `parquetjs-lite` npm package |
+| PDF | `.pdf` | `@firecrawl/pdf-inspector` (prebuilt Rust binary) |
+
+The streaming parser never loads full files into memory — CSV and JSONL are processed line-by-line, Excel and Parquet in chunks. The 50 MB default file size limit (`dataMaxFileSize`) is the practical ceiling before indexing time becomes noticeable.
+
+### PDF Support
+
+PDF indexing uses `@firecrawl/pdf-inspector`, a pure Rust binary with no OCR dependency and no network calls. Each page becomes a row with four columns: `content` (markdown-rendered text), `needs_ocr` (boolean), `has_tables` (boolean), and `has_columns` (boolean). Scanned pages are flagged rather than skipped. Prebuilt binaries are available for `linux-x64` and `macOS ARM64`.
+
+<Note>
+  The default file size limit is **50 MB** (`dataMaxFileSize: 52428800`). Increase it in config if your datasets are larger. The `dataMaxRows` cap (default: 1,000,000) applies separately and prevents extremely wide datasets from overwhelming the row store.
+</Note>
+
+## How Indexing Works
+
+<Steps>
+  <Step title="File scanning">
+    KiroGraph walks the project tree matching files against `dataInclude` and `dataExclude` globs. Only files with a known parser are indexed.
+  </Step>
+  <Step title="Incremental check">
+    A SHA-256 hash of each file is compared against the stored hash. Unchanged files are skipped entirely.
+  </Step>
+  <Step title="Parsing and profiling">
+    The parser streams rows through `ColumnProfiler`, which tracks type inference, cardinality, null percentages, min/max, mean, and sample values per column.
+  </Step>
+  <Step title="Storage">
+    A dynamic per-dataset row table is created in `kirograph.db` (e.g. `data_rows_tests_fixtures_users`). Column profiles go into `data_columns`. A history snapshot is saved to `data_dataset_history` for drift detection.
+  </Step>
+  <Step title="Code linking">
+    When `dataLinkCode: true`, `DataCodeLinker` scans dataset file paths for matches against code symbol names and stores path-based references in `data_code_refs`.
+  </Step>
+</Steps>
+
+## MCP Tools
+
+Data tools require `enableData: true`. The 10 tools add approximately **~519 tokens** of tool descriptions to the model context.
+
+<AccordionGroup>
+  <Accordion title="kirograph_data_list — list indexed datasets">
+    Lists all indexed datasets with row counts, column counts, file sizes, and format.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_data_describe — schema profile">
+    Returns the full schema profile for a dataset: column names, inferred types, cardinality, null percentages, min/max values, and sample values.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `dataset` | string | required | Dataset ID from `kirograph_data_list` |
+    | `column` | string | — | Deep-dive on a single column |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_data_query — filtered row retrieval">
+    Filtered row retrieval with structured operators. Multiple filters are ANDed.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `dataset` | string | required | Dataset ID |
+    | `filters` | Filter[] | — | Array of `{column, op, value}`. Ops: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`, `in`, `is_null`, `between` |
+    | `columns` | string[] | all | Column projection |
+    | `limit` | number | `500` | Max rows (hard cap: 500) |
+    | `offset` | number | `0` | Pagination offset |
+    | `projectPath` | string | cwd | Project root path |
+
+    Example — find all users with a failing status:
+
+    ```json
+    {
+      "dataset": "tests-fixtures-users",
+      "filters": [{ "column": "status", "op": "eq", "value": "failed" }],
+      "columns": ["id", "email", "status", "created_at"],
+      "limit": 50
+    }
+    ```
+  </Accordion>
+  <Accordion title="kirograph_data_aggregate — server-side aggregations">
+    GROUP BY aggregation computed entirely in SQLite. Only results enter the context window.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `dataset` | string | required | Dataset ID |
+    | `groupBy` | string[] | required | Columns to group by |
+    | `metrics` | Metric[] | required | Array of `{column, op}`. Ops: `count`, `sum`, `avg`, `min`, `max`, `count_distinct` |
+    | `filters` | Filter[] | — | Pre-aggregation row filters |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_data_search — keyword search">
+    Searches column names and sample values by keyword within a specific dataset.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `dataset` | string | required | Dataset ID |
+    | `query` | string | required | Search keyword |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_data_join — join two datasets">
+    SQL JOIN across two indexed datasets.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `left` | string | required | Left dataset ID |
+    | `right` | string | required | Right dataset ID |
+    | `leftColumn` | string | required | Join key from left dataset |
+    | `rightColumn` | string | required | Join key from right dataset |
+    | `type` | string | `inner` | Join type: `inner`, `left`, `right` |
+    | `columns` | string[] | all | Column projection (prefix with dataset ID to disambiguate) |
+    | `limit` | number | `100` | Max rows (hard cap: 500) |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_data_correlations — correlation analysis">
+    Pairwise Pearson correlations between all numeric columns in a dataset.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `dataset` | string | required | Dataset ID |
+    | `threshold` | number | `0.3` | Min absolute correlation to include |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+  <Accordion title="kirograph_data_quality — data quality checks">
+    Ranks columns by a composite risk score combining null rate, cardinality anomalies, and type inconsistencies. Useful for triage before writing transformation logic.
+
+    | Parameter | Type | Default | Description |
+    |---|---|---|---|
+    | `dataset` | string | required | Dataset ID |
+    | `projectPath` | string | cwd | Project root path |
+  </Accordion>
+</AccordionGroup>
+
+## Code ↔ Data Linking
+
+When `dataLinkCode: true` (the default), KiroGraph runs `DataCodeLinker` after indexing completes. It detects data file paths that match code symbol names — for example, a file `tests/fixtures/users.csv` linked to a `users` table name or a `seedUsers` function — and stores these as references in `data_code_refs`.
+
+These links surface in `kirograph_context` and `kirograph_impact` results when the related code symbol is in scope.
+
+## PDF Notes
+
+<Note>
+  PDF `content` columns contain full page text rendered as markdown, which can be verbose. If you index PDFs, keep `dataContextLimit` at `0` or `1`. Reading more than one PDF page at a time through `kirograph_context` auto-injection will inflate context significantly. Use `kirograph_data_query` directly to fetch specific pages.
+</Note>
+
+## Config Reference
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enableData` | boolean | `false` | Enable tabular data indexing and querying |
+| `dataInclude` | string[] | `["**/*.csv", "**/*.tsv", ...]` | Glob patterns for data files to include |
+| `dataExclude` | string[] | `["node_modules/**", ...]` | Glob patterns to exclude |
+| `dataLinkCode` | boolean | `true` | Auto-link data files to code symbols via path detection |
+| `dataContextLimit` | number | `0` | Max datasets in `kirograph_context` (0 = disabled) |
+| `dataMaxFileSize` | number | `52428800` | Max file size in bytes (50 MB) |
+| `dataMaxRows` | number | `1000000` | Max rows to index per file |
+| `dataQueryLimit` | number | `500` | Max rows returned per query (hard cap) |
+| `dataMaxResponseTokens` | number | `8000` | Max token budget per data tool response |

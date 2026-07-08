@@ -1,0 +1,201 @@
+---
+title: "Reachability-Aware Security Analysis with KiroGraph"
+sidebarTitle: "Security"
+description: "KiroGraph-Sec goes beyond CVE reporting — it uses your call graph to check whether vulnerable dependency code is actually reachable from your application's entry points."
+---
+
+Traditional software composition analysis (SCA) tools report every CVE that affects any dependency in your lockfile, regardless of whether your application ever calls the vulnerable code. KiroGraph-Sec is different: it traverses the call graph from your application's entry points to determine whether a vulnerable code path is actually reachable. A dependency that is installed but never called cannot be exploited.
+
+This reachability-first approach dramatically reduces noise and lets you focus remediation effort where it actually matters.
+
+---
+
+## Enabling Security Analysis
+
+Add the following to `.kirograph/config.json`:
+
+```json
+{
+  "enableSecurity": true,
+  "securityDatabases": ["OSV"],
+  "securityAutoEnrich": true
+}
+```
+
+`enableSecurity` requires `enableArchitecture: true`. If architecture analysis is disabled when security is enabled, KiroGraph automatically enables it and logs a warning.
+
+---
+
+## How the Pipeline Works
+
+The security pipeline runs as the final phase of indexing, after code extraction, reference resolution, and architecture analysis are complete.
+
+<Steps>
+  <Step title="Manifest Discovery">
+    KiroGraph scans the project tree for all supported manifest files, respecting `.gitignore` and standard skip directories.
+  </Step>
+  <Step title="Dependency Parsing">
+    Package names, version constraints, and dependency scopes are extracted from each manifest. Transitive dependencies are resolved up to 10 levels deep. A lock file is required for precise resolved versions; without one, declared constraints are used.
+  </Step>
+  <Step title="Dependency Graph Integration">
+    Dependencies are linked to code symbols via import and reference edges. Each `dependency` node connects to the symbols that import it, making cross-package call paths traceable.
+  </Step>
+  <Step title="Vulnerability Enrichment">
+    KiroGraph queries the configured vulnerability databases (OSV) for each dependency. Results are stored as `vulnerability` nodes linked to affected `dependency` nodes via `has_vulnerability` edges.
+  </Step>
+  <Step title="Reachability Analysis">
+    The call graph is traversed via BFS from all detected application entry points. For each vulnerable dependency, KiroGraph determines whether any path from an entry point reaches that dependency's code.
+  </Step>
+  <Step title="Impact Analysis">
+    Each vulnerability is classified as `affected`, `not_affected`, or `under_investigation`. Impact summaries include affected architectural layers, reaching entry points, and distinct call paths.
+  </Step>
+</Steps>
+
+---
+
+## Reachability Verdicts
+
+| Verdict | Meaning |
+|---------|---------|
+| `affected` | At least one call path exists from an entry point to the vulnerable dependency. |
+| `not_affected` | No path exists from any entry point, and no unresolved imports were encountered during traversal. |
+| `under_investigation` | The traversal encountered at least one unresolved import. The vulnerability might be reachable through that unknown path. |
+
+---
+
+## Supported Ecosystems
+
+| Ecosystem | Manifest | Lock file |
+|-----------|----------|----------|
+| npm | `package.json` | `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock` |
+| Maven | `pom.xml` | — |
+| Gradle | `build.gradle`, `build.gradle.kts` | `gradle.lockfile` |
+| Go | `go.mod` | `go.sum` |
+| pip | `requirements.txt` | — |
+| Python (modern) | `pyproject.toml` | `poetry.lock`, `pdm.lock`, `uv.lock` |
+| Cargo | `Cargo.toml` | `Cargo.lock` |
+| NuGet | `*.csproj`, `packages.config` | `packages.lock.json` |
+| RubyGems | `Gemfile` | `Gemfile.lock` |
+| Composer | `composer.json` | `composer.lock` |
+| Swift PM | `Package.swift` | `Package.resolved` |
+| Dart / Flutter | `pubspec.yaml` | `pubspec.lock` |
+| Elixir / Hex | `mix.exs` | `mix.lock` |
+| Scala sbt | `build.sbt` | — |
+
+---
+
+## Graph Model Additions
+
+Security analysis adds two new node kinds and three new edge kinds to the knowledge graph:
+
+**Nodes:**
+- `dependency` — A third-party package declared in a manifest
+- `vulnerability` — A CVE record linked to an affected dependency
+
+**Edges:**
+- `has_vulnerability` — Links a dependency to a vulnerability
+- `depends_on` — Links dependencies to their transitive dependencies
+- `declared_in` — Links a dependency to its declaring manifest file
+
+---
+
+## SAST-Lite
+
+KiroGraph includes structural security flow detection that runs automatically during indexing when `enableSecurity: true`. It detects SQL injection, dangerous `eval`/`exec`, unsafe deserialization, path traversal, and weak cryptography. Each finding is tagged with an OWASP Top 10 (2021) category.
+
+These heuristics are structural (call-graph based), not taint-based — findings indicate potential risk but do not confirm exploitability.
+
+---
+
+## AST Pattern Matching
+
+<Warning>
+  AST pattern matching is opt-in and requires `npm install @ast-grep/napi`. Without this dependency, `enablePatterns: true` has no effect. Enable it in config and install the package separately.
+</Warning>
+
+When `enablePatterns: true` and `@ast-grep/napi` is installed, KiroGraph runs structural AST rules during indexing. Unlike heuristic SAST (which matches symbol names), AST patterns match actual code structure — finding SQL injection inside helper functions, not just controllers named "handler".
+
+```json
+{
+  "enablePatterns": true,
+  "patternLibraryPath": "./security-rules"
+}
+```
+
+### Bundled SAST Rules
+
+| ID | Severity | OWASP | Description |
+|----|----------|-------|-------------|
+| `sql-injection-concat-js` | Critical | A03 | SQL query by string concatenation (JS/TS) |
+| `sql-injection-template-js` | Critical | A03 | SQL query by template literal (JS/TS) |
+| `sql-injection-py` | Critical | A03 | SQL query by string formatting (Python) |
+| `dangerous-eval-js` | Critical | A03 | `eval()` with non-literal argument (JS/TS) |
+| `dangerous-exec-py` | Critical | A03 | `os.system()` / `subprocess` with `shell=True` (Python) |
+| `path-traversal-readfile-js` | High | A01 | `fs.readFile` with request param path (JS/TS) |
+| `path-traversal-py` | High | A01 | `open()` with request param path (Python) |
+| `prototype-pollution-js` | High | A08 | `__proto__` assignment (JS/TS) |
+| `weak-crypto-md5-js` | Medium | A02 | `createHash('md5'/'sha1')` (JS/TS) |
+| `weak-crypto-py` | Medium | A02 | `hashlib.md5/sha1()` (Python) |
+
+### Custom YAML Pattern Example
+
+```yaml
+id: sql-injection-concat-ts
+language: typescript
+severity: critical
+message: "Potential SQL injection via string concatenation"
+rule:
+  pattern: |
+    $DB.query($A + $B)
+```
+
+Place custom rule files in the directory specified by `patternLibraryPath`. They are merged with the bundled rules at index time.
+
+---
+
+## Supply Chain Health
+
+Beyond CVEs, KiroGraph-Sec includes supply chain risk tools:
+
+- **OpenSSF Scorecard** scores per dependency
+- **Dependency confusion detection** — internal packages whose names exist in public registries
+- **Typosquatting detection** — packages within Levenshtein distance ≤ 2 from popular packages
+- **Staleness scores** — calculated from major versions behind and months since latest release
+- **Abandoned package detection** — packages inactive for >365 days
+- **New package risk** — packages less than 30 days old
+
+---
+
+## Output Formats
+
+### CycloneDX SBOM
+
+```bash
+kirograph sbom --output sbom.json
+```
+
+Produces a CycloneDX 1.5 SBOM with package URLs (`pkg:npm/express@4.18.2`), dependency relationships, and scope information.
+
+### CycloneDX VEX
+
+```bash
+kirograph vex --output vex.json
+```
+
+Produces a CycloneDX 1.5 VEX document where each vulnerability entry is annotated with KiroGraph's reachability verdict (`affected`, `not_affected`, `under_investigation`).
+
+### SARIF
+
+```bash
+kirograph security ci-report --format sarif --output results.sarif
+```
+
+Produces a SARIF 2.1.0 report uploadable directly to the GitHub Security tab.
+
+### HTML Dashboard
+
+```bash
+kirograph security export --output security-report.html --open
+```
+
+Generates a self-contained HTML security dashboard with tabs for: Overview, Vulnerabilities, SBOM, VEX, Licenses, Staleness, Attack Surface, Secrets, Flows, and Remediation.

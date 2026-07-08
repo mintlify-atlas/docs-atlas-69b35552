@@ -1,0 +1,224 @@
+---
+title: "CLI Setup Commands: install, init, hook, uninit"
+sidebarTitle: "Setup Commands"
+description: "Reference for KiroGraph CLI setup commands: install (MCP + hooks + steering), init (create index dir), hook (global library), and uninit (remove integration files)."
+---
+
+KiroGraph ships two binary names — `kirograph` and the short alias `kg` — both pointing to the same executable. The setup commands wire KiroGraph into your AI coding tool, initialise the index directory, manage a cross-workspace hook library, and cleanly remove the integration when needed. Run them once per project (or per tool), then let the indexing commands take over.
+
+## `kirograph install`
+
+`kirograph install` is the entry-point for integrating KiroGraph with an AI coding assistant. When called with no arguments it presents an interactive menu to choose between a Kiro-only install (recommended) and an auto-detect install that scans the current environment for every supported tool. Passing flags skips that menu.
+
+What the installer writes depends on the target:
+
+- **MCP server config** — wires `kirograph serve --mcp` into the tool's MCP client JSON so the server starts automatically.
+- **Kiro hooks** — writes `.kiro/hooks/kirograph-*.json` for incremental sync, compression hints, memory capture, and watchmen.
+- **Steering doc** — writes `.kiro/steering/kirograph.md` so Kiro agents understand the graph's capabilities.
+- **Agent config** — writes `.kiro/agents/kirograph.json`.
+- **Memory block** — appends a KiroGraph import to `CLAUDE.md` (for Claude Code) or an `AGENTS.md` block (for Codex/OpenAI Codex).
+
+<Tip>
+  Use `kg install` as a shorthand — `kg` is registered as a binary alias for `kirograph` in `package.json`.
+</Tip>
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--target <tool>` | Install for a specific tool (see supported targets below) |
+| `--all` | Auto-detect all supported platforms and install without prompting |
+| `--yes` | Skip interactive prompts; keep existing config values |
+| `--dry-run` | Show what would be written without making any changes |
+
+### Supported `--target` values
+
+`kiro`, `cursor`, `claude`, `codex`, `windsurf`, `cline`, `copilot`, `copilot-cli`, `continue`, `roo`, `aider`, `amp`, `gemini-cli`, `opencode`, `warp`, `replit`, `devin`, `goose`, `trae`, `qoder`, `junie`, `kilo`, `tabnine`, `augment`, `antigravity`, `qwen`, `openhands`, `mistral-vibe`, `ibm-bob`, `crush`, `droid-factory`, `forgecode`, `iflow`, `rovo`
+
+### Examples
+
+```bash
+# Interactive install — choose Kiro-only or auto-detect
+kirograph install
+
+# Install for Kiro only, skip prompts
+kirograph install --target kiro --yes
+
+# Install for Claude Code
+kirograph install --target claude
+
+# Auto-detect all tools present in the environment
+kirograph install --all
+
+# Preview what would change without touching the filesystem
+kirograph install --dry-run
+
+# Short alias
+kg install
+```
+
+<Note>
+  During an interactive Kiro install (without `--yes`), if `~/.kirograph/hooks/` is non-empty the installer adds a **Hooks** step that lets you import hooks from your global library into the workspace. Choose `None`, `All`, or `Select specific hooks`.
+</Note>
+
+---
+
+## `kirograph init`
+
+`kirograph init` creates the `.kirograph/` directory and writes a default `config.json` inside it. This is a lightweight prerequisite — you need to run it before indexing or any other command that reads from the database.
+
+### Flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--index` | `-i` | Run a full index immediately after initialisation |
+
+### Examples
+
+```bash
+# Initialise in the current directory
+kirograph init
+
+# Initialise a specific project path
+kirograph init /path/to/project
+
+# Initialise and index in one step
+kirograph init --index
+
+# Short alias
+kg init
+```
+
+After running `kirograph init` you will see a `.kirograph/` directory containing:
+
+```
+.kirograph/
+├── config.json        # Default configuration (edit to enable features)
+└── kirograph.db       # Created on first index (SQLite graph)
+```
+
+<Tip>
+  `kirograph init --index` is the fastest way to go from a new checkout to a fully indexed graph in a single command. It is equivalent to running `kirograph init` followed by `kirograph index --force`.
+</Tip>
+
+---
+
+## `kirograph hook`
+
+`kirograph hook` manages a personal library of Kiro hooks stored in `~/.kirograph/hooks/`. Hooks are JSON files that trigger KiroGraph tasks (sync, memory capture, compression) on file events in Kiro IDE. Saving hooks to the global store lets you reuse them across multiple workspaces.
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `kirograph hook save [path]` | Copy workspace `.kiro/hooks/` into the global store |
+| `kirograph hook save --all` | Save all hooks without an interactive selection prompt |
+| `kirograph hook import [path]` | Copy hooks from the global store into the workspace |
+| `kirograph hook import --all` | Import all hooks without prompting |
+| `kirograph hook list` | List all hooks saved in the global store |
+
+### Examples
+
+```bash
+# Interactively choose which workspace hooks to save globally
+kirograph hook save
+
+# Save everything from the current workspace
+kirograph hook save --all
+
+# Interactively choose which global hooks to import into this workspace
+kirograph hook import
+
+# Import all global hooks silently
+kirograph hook import --all
+
+# List what's in the global store
+kirograph hook list
+```
+
+<Note>
+  Interactive `save` and `import` menus offer `All`, `Select specific hooks`, and `Cancel`. `hook list` shows each hook's display name and description; the `save`/`import` summaries show display names only.
+</Note>
+
+---
+
+## `kirograph uninit`
+
+`kirograph uninit` (aliased as `kirograph uninstall`) removes KiroGraph integration files from a project. Without `--force` it presents an interactive checklist so you can choose exactly what to delete. Use `--force` in automation.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Remove everything without confirmation prompts |
+| `--target <tool>` | Remove integration files for a specific tool only (default: `kiro`) |
+| `--target all` | Remove integration files for every supported tool |
+
+### What can be removed
+
+- `.kirograph/` — the entire index directory and database
+- `.kiro/hooks/kirograph-*.json` — Kiro IDE hooks
+- `.kiro/steering/kirograph.md` — Kiro steering document
+- `.kiro/agents/kirograph.json` — Kiro agent config
+- The `kirograph` entry from `.mcp.json`
+- The KiroGraph import block in `CLAUDE.md`
+- The KiroGraph block in `AGENTS.md`
+
+### Examples
+
+```bash
+# Interactive removal — prompts for each component
+kirograph uninit
+
+# Remove everything without confirmation
+kirograph uninit --force
+
+# Remove all tool integration files and .kirograph/ data
+kirograph uninit --target all --force
+
+# Alias: same as uninit
+kirograph uninstall --force
+
+# Short alias
+kg uninit --force
+```
+
+<Warning>
+  `kirograph uninit --force` permanently deletes `.kirograph/` including the SQLite graph and any saved snapshots. Re-initialise and re-index from scratch with `kirograph init --index`.
+</Warning>
+
+---
+
+## `kirograph serve`
+
+`kirograph serve --mcp` starts the KiroGraph MCP server using stdio transport. In normal usage this command is invoked automatically by the AI coding tool via the MCP server config written by `kirograph install` — you do not need to run it manually.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--mcp` | Start the MCP stdio server (required) |
+| `--path <path>` | Override the project root path (defaults to `cwd`) |
+
+### Examples
+
+```bash
+# Start the MCP server (used by your AI tool)
+kirograph serve --mcp
+
+# Start pointing at a specific project
+kirograph serve --mcp --path /workspace/myproject
+```
+
+The MCP config written by `kirograph install` looks like this:
+
+```json
+{
+  "mcpServers": {
+    "kirograph": {
+      "command": "kirograph",
+      "args": ["serve", "--mcp"]
+    }
+  }
+}
+```

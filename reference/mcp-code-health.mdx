@@ -1,0 +1,636 @@
+---
+title: "Code Health MCP Tools Reference"
+sidebarTitle: "Code Health"
+description: "Reference for KiroGraph's code health tools: dead code detection, circular dependencies, hotspots, type hierarchies, snapshots, and complexity analysis."
+---
+
+KiroGraph's code-health tools surface structural problems in your codebase that are invisible to linters but detectable in a semantic graph: symbols nobody calls, import cycles, tightly coupled hot zones, surprising long-range connections, and classes that have grown too large. All tools in this group require `enableCodeHealth: true` unless noted. Complexity tools require the additional `enableComplexity: true` flag, branch tools require `enableBranch: true`, and edit primitives require `enableEditPrimitives: true`.
+
+---
+
+## Graph Health Tools (require `enableCodeHealth: true`)
+
+### `kirograph_dead_code`
+
+Find symbols with no incoming references — potential dead code. Only unexported symbols are considered, since exported symbols may be called by external consumers.
+
+<ParamField body="limit" type="number" default="50">
+  Maximum results to return (1–100).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+```json
+{
+  "tool": "kirograph_dead_code",
+  "arguments": { "limit": 30 }
+}
+```
+
+---
+
+### `kirograph_circular_deps`
+
+Find circular import dependencies using Tarjan's strongly connected components algorithm. Every reported cycle is a set of modules that cannot be loaded independently.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_hotspots`
+
+Find the most-connected symbols by total edge degree (incoming + outgoing). Excludes structural `contains` edges so the results reflect genuine coupling, not class membership. Useful for identifying load-bearing abstractions or blast-radius hot zones before refactoring.
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return (1–100).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_surprising`
+
+Find non-obvious cross-file connections: direct edges between symbols in structurally distant parts of the codebase. High-scoring pairs indicate unexpected coupling worth investigating.
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return (1–100).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+**Scoring:** All cross-file edges (excluding `contains` and `import`) are scored by path distance between source and target files × edge-kind weight (`calls=1.0`, `references=0.8`, `type_of=0.7`, etc.). The highest-scoring unique symbol pairs are returned.
+
+---
+
+### `kirograph_type_hierarchy`
+
+Traverse the type hierarchy of a class or interface in either direction: up to base types, down to derived types, or both.
+
+<ParamField body="symbol" type="string" required>
+  Class or interface name to start from.
+</ParamField>
+
+<ParamField body="direction" type="string" default="both">
+  Traversal direction. Options: `up` (base types only), `down` (derived types only), `both`.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_diff`
+
+Compare the current graph state against a saved snapshot. Shows added and removed symbols and edges since the snapshot was taken.
+
+<ParamField body="snapshot" type="string" default="latest">
+  Snapshot label. Omit to use the most recently saved snapshot.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_snapshot_save`
+
+Save a snapshot of the current graph state with an optional label. Use before major refactors and compare with `kirograph_diff` afterward.
+
+<ParamField body="label" type="string">
+  Human-readable label for the snapshot. Defaults to a timestamp-based label.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_snapshot_list`
+
+List all saved graph snapshots with their labels, timestamps, symbol counts, and edge counts.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_communities`
+
+Detect clusters of tightly related symbols using a graph community-detection algorithm. Returns community IDs, member counts, and the symbols in each community — useful for identifying emergent module boundaries.
+
+<ParamField body="resolution" type="number">
+  Granularity from 0.1 to 2.0. Higher values produce more, smaller communities.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum communities to return (default 15).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_rank`
+
+Rank symbols by fan-in (number of callers) or fan-out (number of callees) edge count.
+
+<ParamField body="by" type="string" default="fan-in">
+  Ranking dimension. Options: `fan-in` (symbols most called by others), `fan-out` (symbols that call the most).
+</ParamField>
+
+<ParamField body="limit" type="number" default="30">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_distribution`
+
+Show a symbol-kind breakdown (function, class, method, interface, …) for a specific file, directory, or the entire project.
+
+<ParamField body="path" type="string">
+  Directory or file path prefix to scope. Omit for whole-project stats.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_module_api`
+
+List all exported symbols in a file or directory — the public API surface. Useful for understanding what a module exposes before writing code that depends on it.
+
+<ParamField body="path" type="string">
+  File path (e.g. `"src/auth/service.ts"`) or directory prefix (e.g. `"src/auth/"`). Omit for the whole project.
+</ParamField>
+
+<ParamField body="limit" type="number" default="100">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_rename_preview`
+
+Show every reference site for a symbol — a blast-radius preview before performing a rename. Returns the file, line, and referencing symbol for each site.
+
+<ParamField body="symbol" type="string" required>
+  Symbol name to find all references for.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_doc_coverage`
+
+Find exported symbols that are missing docstrings. Only considers functions, methods, classes, interfaces, and type aliases.
+
+<ParamField body="limit" type="number" default="50">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_god_class`
+
+List classes ranked by member count to identify god classes — classes that have grown to own too much responsibility.
+
+<ParamField body="threshold" type="number" default="10">
+  Member count threshold for flagging. Classes at or above this count are marked with `⚠`.
+</ParamField>
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_inheritance_depth`
+
+Show the deepest inheritance chains using BFS traversal of `extends`/`implements` edges. Deeply nested hierarchies are fragile and often indicate over-engineering.
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_recursion`
+
+Find recursive and mutually recursive functions using strongly connected component analysis on the call graph. Reports direct recursion (a function calls itself) and mutual recursion (two-cycle detection).
+
+<ParamField body="limit" type="number" default="30">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_largest`
+
+List symbols ranked by lines of code (`end_line − start_line + 1`). Large functions are candidates for extraction or simplification.
+
+<ParamField body="limit" type="number" default="30">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_annotations`
+
+Decorator/annotation histogram for the whole project, or a list of symbols using a specific decorator.
+
+<ParamField body="decorator" type="string">
+  Decorator name to filter (e.g. `"Injectable"`). Omit for a full histogram across all decorators.
+</ParamField>
+
+<ParamField body="limit" type="number" default="50">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_unused_imports`
+
+Find import nodes with zero resolved downstream edges — nothing in the codebase references the imported symbol. These are safe-to-remove imports that add noise to the graph.
+
+<ParamField body="limit" type="number" default="50">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_gini`
+
+Compute the Gini inequality coefficient for a size metric across all function and method nodes. Returns the coefficient (0 = perfect equality, 1 = all value in one node) plus the top 5 and bottom 5 symbols.
+
+<ParamField body="metric" type="string" default="loc">
+  Metric to measure. Options: `loc` (lines of code), `fan-in` (incoming calls), `fan-out` (outgoing calls).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_dependency_depth`
+
+Run a Kahn topological sort on the file import graph and report each file's longest path from a root. Files with high depth are deep in the dependency chain and expensive to change.
+
+<ParamField body="limit" type="number" default="20">
+  Maximum files to show, sorted by depth descending.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_session_start`
+
+Save the current graph metrics as a session baseline. Pair with `kirograph_session_end` to measure the structural impact of a refactoring session.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_session_end`
+
+Diff current graph metrics against the session baseline saved by `kirograph_session_start` and report per-dimension deltas (nodes added/removed, edges added/removed, dead code delta, etc.).
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Complexity Tools (require `enableComplexity: true`)
+
+### `kirograph_complexity`
+
+Rank symbols by cyclomatic complexity, cognitive complexity, or maintainability index. Requires `enableComplexity: true` **and** a re-index after enabling the flag.
+
+<ParamField body="metric" type="string" default="cyclomatic">
+  Ranking metric. Options: `cyclomatic` (McCabe complexity), `cognitive` (cognitive load score), `maintainability` (Microsoft Maintainability Index).
+</ParamField>
+
+<ParamField body="threshold" type="number">
+  Flag symbols above this value for CC/cognitive, or below this value for MI.
+</ParamField>
+
+<ParamField body="limit" type="number" default="30">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_simplify_scan`
+
+Find functions and methods that exceed complexity, size, or maintainability thresholds in a single scan. Returns a prioritized list of simplification candidates.
+
+<ParamField body="thresholdCC" type="number" default="10">
+  Cyclomatic complexity threshold.
+</ParamField>
+
+<ParamField body="thresholdMI" type="number" default="50">
+  Maintainability index lower bound. Symbols below this value are flagged.
+</ParamField>
+
+<ParamField body="thresholdLOC" type="number" default="50">
+  Lines of code threshold.
+</ParamField>
+
+<ParamField body="limit" type="number" default="30">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_health`
+
+Composite graph health score from 0 to 10,000 — higher is better. Aggregates complexity, dead code ratio, coupling, and circular dependency counts into a single number suitable for tracking over time.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_dsm`
+
+Design Structure Matrix: dependency counts between top-level modules. Reveals architectural coupling and layering violations at a glance.
+
+<ParamField body="limit" type="number" default="15">
+  Maximum module groups to include.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_test_risk`
+
+Risk-ranked list of functions based on `complexity × fan-in`. Functions with high complexity that are also called from many places are most likely to break when changed and most valuable to test.
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="threshold" type="number" default="0">
+  Minimum risk score to include.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Branch Tools (require `enableBranch: true`)
+
+### `kirograph_branch_diff`
+
+Compare symbols added, removed, or changed between two tracked branches. Each branch must have been indexed at least once.
+
+<ParamField body="branchA" type="string" required>
+  First branch name.
+</ParamField>
+
+<ParamField body="branchB" type="string" default="main">
+  Second branch name.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_branch_search`
+
+Search for symbols within a specific tracked branch's graph. Useful for checking whether a symbol exists on a feature branch before merging.
+
+<ParamField body="query" type="string" required>
+  Search query (symbol name, partial match).
+</ParamField>
+
+<ParamField body="branch" type="string" required>
+  Branch name to search in.
+</ParamField>
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_branch_list`
+
+List all tracked branches with their database sizes and last sync timestamps.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Edit Primitives (require `enableEditPrimitives: true`)
+
+<Warning>
+  Edit primitive tools have `readOnlyHint: false` and modify project files directly. They are not included in the default `autoApprove` list — your MCP client will prompt for confirmation unless you explicitly add them.
+</Warning>
+
+### `kirograph_str_replace`
+
+Replace a unique string anchor in a file. Fails if the anchor appears zero or more than one time in the file, preventing ambiguous edits.
+
+<ParamField body="file" type="string" required>
+  File path relative to project root.
+</ParamField>
+
+<ParamField body="old_str" type="string" required>
+  Exact string to find (must be unique in the file).
+</ParamField>
+
+<ParamField body="new_str" type="string" required>
+  Replacement string.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_multi_str_replace`
+
+Apply N replacements as an all-or-nothing transaction. Aborts if any anchor is ambiguous or missing — no partial edits.
+
+<ParamField body="file" type="string" required>
+  File path relative to project root.
+</ParamField>
+
+<ParamField body="pairs" type="array" required>
+  Array of `{ old_str, new_str }` replacement pairs applied in order.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_insert_at`
+
+Insert content before or after a unique anchor string or a specific line number.
+
+<ParamField body="file" type="string" required>
+  File path relative to project root.
+</ParamField>
+
+<ParamField body="content" type="string" required>
+  Content to insert (include a trailing newline if needed).
+</ParamField>
+
+<ParamField body="anchor" type="string">
+  Unique string anchor to insert relative to. Mutually exclusive with `line`.
+</ParamField>
+
+<ParamField body="line" type="number">
+  1-based line number to insert relative to. Mutually exclusive with `anchor`.
+</ParamField>
+
+<ParamField body="position" type="string" default="after">
+  Whether to insert `"before"` or `"after"` the anchor or line.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_ast_grep_rewrite`
+
+Structural AST rewrite via `ast-grep`. Applies a pattern-based rewrite across the entire file. Skipped silently if `ast-grep` is not installed on the system.
+
+<ParamField body="file" type="string" required>
+  File path relative to project root.
+</ParamField>
+
+<ParamField body="pattern" type="string" required>
+  `ast-grep` pattern to match (e.g. `"console.log($MSG)"`).
+</ParamField>
+
+<ParamField body="rewrite" type="string" required>
+  `ast-grep` rewrite template (e.g. `"logger.debug($MSG)"`).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_refactor`
+
+Rename preview or refactoring suggestions for a symbol.
+
+<ParamField body="mode" type="string" required>
+  Operation mode. Options: `rename` (preview all reference sites), `suggest` (generate refactoring suggestions).
+</ParamField>
+
+<ParamField body="symbol" type="string">
+  Symbol name (required for `rename` mode).
+</ParamField>
+
+<ParamField body="limit" type="number" default="10">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+```json
+{
+  "tool": "kirograph_refactor",
+  "arguments": {
+    "mode": "rename",
+    "symbol": "parseJwt"
+  }
+}
+```

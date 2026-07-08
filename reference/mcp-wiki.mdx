@@ -1,0 +1,323 @@
+---
+title: "Wiki Module MCP Tools Reference"
+sidebarTitle: "Wiki Tools"
+description: "Reference for KiroGraph's wiki MCP tools implementing the Karpathy LLM wiki pattern: ingest, apply, lint, search, and manage knowledge pages across sessions."
+---
+
+KiroGraph's wiki module implements the **Karpathy LLM wiki pattern**: the agent reads source text, produces structured `WIKI_DIFF` blocks, and writes them to a versioned SQLite-backed Markdown wiki stored at `.kirograph/wiki/`. The knowledge base grows incrementally across sessions — each `kirograph_wiki_ingest` call enriches the wiki without clobbering prior content. All tools require `enableWiki: true` in `.kirograph/config.json`.
+
+<Info>
+  Wiki pages live on disk at `.kirograph/wiki/<slug>.md` and are simultaneously indexed in SQLite for full-text search. Run `kirograph_wiki_reindex` to re-sync SQLite from disk if you edit the Markdown files manually.
+</Info>
+
+---
+
+## WIKI_DIFF Block Format
+
+The LLM writes changes using `WIKI_DIFF_START … WIKI_DIFF_END` blocks. Each block has a JSON header on the first line, followed by the Markdown content. Multiple blocks can appear in a single response.
+
+```text title="WIKI_DIFF block format"
+WIKI_DIFF_START
+{"action":"upsert","page":"PageSlug","section":"Decisions","mode":"append"}
+- 2025-06-15 — Switched auth strategy to session cookies for server-side revocation.
+WIKI_DIFF_END
+```
+
+**Actions:**
+
+| Action | Description |
+|--------|-------------|
+| `create` | Create a new page. Requires a `title` field. Content is the full page Markdown. |
+| `upsert` | Update a specific `section` in an existing page. `mode` is `append` (default) or `replace`. |
+| `append` | Append content to the end of an existing page. |
+
+**Conflicts** are reported in a separate block:
+
+```text title="WIKI_DIFF_CONFLICTS block format"
+WIKI_DIFF_CONFLICTS
+{"page":"AuthService","section":"Decisions","existing":"Uses JWT tokens","incoming":"Uses session cookies","source":"ADR-007.md","existingDate":"2024-11-01","incomingDate":"2025-06-15"}
+WIKI_DIFF_CONFLICTS_END
+```
+
+When `autoResolveConflicts: true` is set in config, conflicts where `incomingDate` is newer are automatically resolved by replacing the existing claim and appending a superseded note. Otherwise, conflicts are held as `pending` and reported by `kirograph_wiki_apply_diff`.
+
+---
+
+## `kirograph_wiki_ingest`
+
+Build a structured prompt for the LLM to update the wiki from a source text. The prompt includes the wiki `SCHEMA.md`, the current `MANIFEST.md`, and the source content, instructing the LLM to produce `WIKI_DIFF` blocks. After calling this tool, pass the LLM's output to `kirograph_wiki_apply_diff`.
+
+In `local` synthesis mode (`wikiSynthesisMode: "local"`), the source is queued for batch processing by the local model; the agent does not produce a WIKI_DIFF itself.
+
+<ParamField body="source" type="string" required>
+  Source content to ingest. Can be a block of raw text, a file path, or a symbol name.
+</ParamField>
+
+<ParamField body="sourceName" type="string">
+  Human-readable name for the source (e.g. `"ADR-007.md"`, `"sprint-14-retro"`). Used in `## Sources` sections and conflict metadata.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: ingest an architecture decision record"
+{
+  "tool": "kirograph_wiki_ingest",
+  "arguments": {
+    "source": "# ADR-007: Session Cookies for Auth\n\nWe decided to replace JWT tokens with server-side session cookies to allow instant revocation without a token blacklist...",
+    "sourceName": "ADR-007.md"
+  }
+}
+```
+
+The tool returns a `WIKI_INGEST_PROMPT` block. Pass the LLM's response (the WIKI_DIFF blocks) to `kirograph_wiki_apply_diff`.
+
+---
+
+## `kirograph_wiki_apply_diff`
+
+Parse and apply a `WIKI_DIFF` string produced by the LLM. Writes updated Markdown files to `.kirograph/wiki/` and updates the SQLite index. Returns lists of created pages, updated pages, auto-resolved conflicts, and pending conflicts.
+
+<ParamField body="diff" type="string" required>
+  The raw `WIKI_DIFF` output from the LLM, including all `WIKI_DIFF_START … WIKI_DIFF_END` blocks and any `WIKI_DIFF_CONFLICTS … WIKI_DIFF_CONFLICTS_END` blocks.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_wiki_apply_diff",
+  "arguments": {
+    "diff": "WIKI_DIFF_START\n{\"action\":\"upsert\",\"page\":\"AuthService\",\"section\":\"Decisions\",\"mode\":\"append\"}\n- 2025-06-15 — Switched to session cookies (ADR-007).\nWIKI_DIFF_END"
+  }
+}
+```
+
+```text title="Example output"
+✓ Wiki diff applied
+  Updated: AuthService
+```
+
+---
+
+## `kirograph_wiki_lint`
+
+Check the wiki for structural issues: broken internal links, orphan pages (not linked from any other page), and contradictions (sections flagged as conflicting during a previous ingest). Returns lint errors with their kind and detail.
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_wiki_lint",
+  "arguments": {}
+}
+```
+
+```text title="Example output"
+Wiki Lint — 2 issue(s)
+
+🔗 [broken_link] AuthService
+  References [[PaymentGateway]] but no page with that slug exists.
+
+○ [orphan] rate-limiting
+  Page exists but is not linked from any other page.
+```
+
+---
+
+## `kirograph_wiki_search`
+
+Full-text search across all wiki pages. Returns pages ranked by relevance with a content preview.
+
+<ParamField body="query" type="string" required>
+  Search query.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum results to return. Defaults to `5`, capped at `20`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_wiki_search",
+  "arguments": { "query": "authentication session cookies", "limit": 5 }
+}
+```
+
+---
+
+## `kirograph_wiki_page`
+
+Retrieve the full Markdown content of a specific wiki page by its slug.
+
+<ParamField body="slug" type="string" required>
+  Page slug (e.g. `"AuthService"`, `"arch/session-cookies"`). Use `kirograph_wiki_list` to discover slugs.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_wiki_page",
+  "arguments": { "slug": "AuthService" }
+}
+```
+
+---
+
+## `kirograph_wiki_list`
+
+List all wiki pages with their slugs, titles, source counts, and last-updated dates.
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_wiki_list",
+  "arguments": {}
+}
+```
+
+```text title="Example output"
+Wiki — 8 page(s), 14 total sources
+
+  AuthService                      Authentication Service  (3 src, 2025-06-15)
+  PaymentService                   Payment Processing      (2 src, 2025-05-30)
+  arch/session-cookies             ADR-007 Session Auth    (1 src, 2025-06-15)
+```
+
+---
+
+## `kirograph_wiki_status`
+
+Wiki health summary: page count, total ingested sources, oldest and newest page dates, and the wiki directory path.
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_wiki_status",
+  "arguments": {}
+}
+```
+
+```text title="Example output"
+Wiki Status:
+  Pages:         8
+  Total sources: 14
+  Oldest page:   2025-03-10
+  Newest page:   2025-06-15
+  Wiki dir:      .kirograph/wiki/
+```
+
+---
+
+## `kirograph_wiki_synthesize`
+
+Trigger local-model wiki synthesis for all queued sources (only available when `wikiSynthesisMode: "local"`). Processes the queue, writes wiki pages, and reports created/updated counts. Errors are reported per source.
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_wiki_synthesize",
+  "arguments": {}
+}
+```
+
+---
+
+## `kirograph_wiki_reindex`
+
+Re-sync the SQLite search index from the Markdown files in `.kirograph/wiki/`. Use after manually editing wiki `.md` files outside of the MCP tools.
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_wiki_reindex",
+  "arguments": {}
+}
+```
+
+---
+
+## Complete Ingest → Apply → Lint Workflow
+
+<Steps>
+  <Step title="Initialise the wiki (first time only)">
+    Creates `SCHEMA.md` and `MANIFEST.md` in `.kirograph/wiki/`:
+
+    ```json
+    {
+      "tool": "kirograph_wiki_init",
+      "arguments": {}
+    }
+    ```
+  </Step>
+
+  <Step title="Ingest a source document">
+    Pass the source text — a retro doc, an ADR, a design spec, or a session transcript:
+
+    ```json
+    {
+      "tool": "kirograph_wiki_ingest",
+      "arguments": {
+        "source": "## Sprint 14 Retro\n\n**What went well:** Shipped the auth migration on time.\n**Decisions made:** JWT replaced by session cookies — see ADR-007.\n**Issues:** WebSocket reconnect race condition found under load.",
+        "sourceName": "sprint-14-retro"
+      }
+    }
+    ```
+
+    The tool returns a `WIKI_INGEST_PROMPT`. Submit it to the LLM and collect the `WIKI_DIFF` response.
+  </Step>
+
+  <Step title="Apply the LLM's WIKI_DIFF output">
+    Pass the LLM's raw output to `kirograph_wiki_apply_diff`:
+
+    ```json
+    {
+      "tool": "kirograph_wiki_apply_diff",
+      "arguments": {
+        "diff": "WIKI_DIFF_START\n{\"action\":\"upsert\",\"page\":\"AuthService\",\"section\":\"Decisions\",\"mode\":\"append\"}\n- 2025-06-15 — JWT replaced by session cookies (sprint-14-retro).\nWIKI_DIFF_END\nWIKI_DIFF_START\n{\"action\":\"upsert\",\"page\":\"error/websocket-reconnect\",\"section\":\"Known Issues / Gotchas\",\"mode\":\"append\"}\n- Reconnect race condition under load (sprint-14-retro). See obs_e1f2g3 in memory.\nWIKI_DIFF_END"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Lint the wiki">
+    Check for broken links and orphan pages before the session ends:
+
+    ```json
+    {
+      "tool": "kirograph_wiki_lint",
+      "arguments": {}
+    }
+    ```
+
+    Fix any `broken_link` issues by creating the missing page or correcting the slug.
+  </Step>
+</Steps>
+
+<Tip>
+  Store wiki search results in memory with `kirograph_mem_store` so future sessions can find relevant wiki pages via `kirograph_mem_search` even before calling `kirograph_wiki_search`.
+</Tip>

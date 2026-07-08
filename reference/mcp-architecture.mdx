@@ -1,0 +1,266 @@
+---
+title: "Architecture MCP Tools Reference"
+sidebarTitle: "Architecture Tools"
+description: "Reference for KiroGraph's 5 architecture MCP tools: package graph, layer detection, coupling metrics, instability scores, and dependency depth analysis."
+---
+
+KiroGraph's architecture tools expose the macro-level structure of your codebase as queryable data: package graphs, layer assignments, coupling metrics, and community detection. All tools in this group require `enableArchitecture: true` in `.kirograph/config.json`. The index must be rebuilt after enabling the flag — run `kirograph index` to populate architecture data.
+
+<Info>
+  Architecture data is derived from manifest files (`package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, etc.) combined with the import graph extracted during indexing. No static analysis configuration is required.
+</Info>
+
+---
+
+## `kirograph_architecture`
+
+Get the full architecture overview: detected packages, layer assignments, and the dependency graph between them. The `level` parameter controls whether you see packages, layers, or both.
+
+<ParamField body="level" type="string">
+  What to return: `packages`, `layers`, or `both` (default).
+</ParamField>
+
+<ParamField body="includeFiles" type="boolean">
+  When `true`, appends a `File → Package` mapping (truncated at 50 entries). Defaults to `false`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: full overview"
+{
+  "tool": "kirograph_architecture",
+  "arguments": { "level": "both" }
+}
+```
+
+```text title="Example output"
+# Architecture
+
+## Packages
+- **api** (src/api) [manifest · TypeScript, 1.0.0]
+- **service** (src/service) [manifest · TypeScript, 1.0.0]
+- **data** (src/data) [manifest · TypeScript, 1.0.0]
+
+## Package Dependencies
+- api → service (14 imports)
+- service → data (22 imports)
+
+## Layers
+- **presentation** [heuristic] — 12 files
+- **business** [heuristic] — 28 files
+- **persistence** [heuristic] — 9 files
+
+## Layer Dependencies
+- presentation → business (47)
+- business → persistence (19)
+```
+
+---
+
+## `kirograph_coupling`
+
+Compute coupling metrics for every package. Returns **Ca** (afferent — how many packages depend on this one), **Ce** (efferent — how many packages this one depends on), and **instability** (`Ce / (Ca + Ce)`). An instability score near `1.0` means the package is highly dependent on others and hard to change independently; a score near `0.0` means it is a stable foundation.
+
+<ParamField body="sortBy" type="string">
+  Sort the results by `instability` (default), `afferent`, or `efferent`.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum packages to return. Defaults to `20`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: find the most unstable packages"
+{
+  "tool": "kirograph_coupling",
+  "arguments": { "sortBy": "instability", "limit": 10 }
+}
+```
+
+```text title="Example output"
+Coupling Metrics (sorted by instability):
+
+Package                          Ca    Ce    I
+────────────────────────────────────────────────────
+api                               0    14   1.00
+service                           1    22   0.96
+utils                             8     3   0.27
+data                              3     0   0.00
+
+Ca=afferent (depended on by), Ce=efferent (depends on), I=instability (Ce/(Ca+Ce))
+```
+
+---
+
+## `kirograph_package`
+
+Inspect a single package in detail: path, source manifest, version, language, coupling scores, inbound and outbound package dependencies, external npm/PyPI/crates dependencies, and the files it contains.
+
+<ParamField body="package" type="string" required>
+  Package name, path prefix, or ID. Partial matches are accepted.
+</ParamField>
+
+<ParamField body="includeFiles" type="boolean">
+  List the files belonging to this package (up to 30, then truncated). Defaults to `true`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: inspect the service package"
+{
+  "tool": "kirograph_package",
+  "arguments": { "package": "service" }
+}
+```
+
+```text title="Example output"
+## Package: service
+Path: src/service
+Source: manifest (src/service/package.json)
+Version: 1.0.0
+Language: TypeScript
+
+Coupling: Ca=1 Ce=22 I=0.96
+
+Depends on (2):
+  → data (22 imports)
+  → shared (3 imports)
+
+Depended on by (1):
+  ← api (14 imports)
+
+External deps (5): zod, date-fns, axios, pino, uuid
+
+Files (8):
+  src/service/UserService.ts
+  src/service/PaymentService.ts
+  ...
+```
+
+---
+
+## `kirograph_communities`
+
+Detect logical communities within the codebase using graph modularity. Communities represent clusters of symbols that talk to each other more than to the rest of the graph — often aligning with domain boundaries even when package structure doesn't enforce them.
+
+<ParamField body="limit" type="number">
+  Maximum communities to return. Defaults to `15`.
+</ParamField>
+
+<ParamField body="resolution" type="number">
+  Louvain resolution parameter. Higher values produce more, smaller communities. Defaults to `1.0`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_communities",
+  "arguments": { "limit": 10, "resolution": 1.0 }
+}
+```
+
+---
+
+## `kirograph_manifest`
+
+List all packages declared in manifest files across the workspace, with optional version drift detection and per-package dependency drill-down.
+
+<ParamField body="package" type="string">
+  Package name or path for a per-package deep dive (external deps, version, license).
+</ParamField>
+
+<ParamField body="ecosystem" type="string">
+  Filter to a specific ecosystem by language keyword (e.g. `typescript`, `python`, `rust`).
+</ParamField>
+
+<ParamField body="showDrift" type="boolean">
+  When `true`, reports packages declared in multiple places with differing versions.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+<CodeGroup>
+```json title="List all packages"
+{
+  "tool": "kirograph_manifest",
+  "arguments": {}
+}
+```
+
+```json title="Check for version drift"
+{
+  "tool": "kirograph_manifest",
+  "arguments": { "showDrift": true }
+}
+```
+
+```json title="Drill into one package"
+{
+  "tool": "kirograph_manifest",
+  "arguments": { "package": "service" }
+}
+```
+</CodeGroup>
+
+---
+
+## Refactor Planning Example
+
+Use `kirograph_coupling` to locate high-instability packages before starting a refactor, then drill into them with `kirograph_package` to understand exactly what depends on them.
+
+<Steps>
+  <Step title="Find the most unstable packages">
+    Identify packages with instability scores above `0.8` — these are the hardest to change safely:
+
+    ```json
+    {
+      "tool": "kirograph_coupling",
+      "arguments": { "sortBy": "instability", "limit": 20 }
+    }
+    ```
+
+    Any package with `I > 0.8` should be reviewed before the refactor touches it.
+  </Step>
+
+  <Step title="Drill into a high-instability package">
+    For each flagged package, inspect its inbound and outbound dependencies:
+
+    ```json
+    {
+      "tool": "kirograph_package",
+      "arguments": { "package": "api", "includeFiles": true }
+    }
+    ```
+
+    The `Depends on` section shows what needs to remain stable; `Depended on by` shows who will be broken if the package's interface changes.
+  </Step>
+
+  <Step title="Identify natural boundaries with communities">
+    If the package structure feels artificial, run community detection to find the graph's natural clusters:
+
+    ```json
+    {
+      "tool": "kirograph_communities",
+      "arguments": { "limit": 10 }
+    }
+    ```
+
+    Communities with high inter-community edge counts are candidates for boundary consolidation.
+  </Step>
+</Steps>
+
+<Warning>
+  A package with `Ca = 0` (nothing depends on it) and high `Ce` may be dead code or a bootstrap entry point — check with `kirograph_dead_code` before restructuring.
+</Warning>

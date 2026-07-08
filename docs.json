@@ -1,72 +1,93 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "KiroGraph",
+  "theme": "luma",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#9344fb",
+    "light": "#e1d3f4",
+    "dark": "#090909"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
+  "favicon": "https://media.brand.dev/d51a35be-f75f-45cd-a533-1084eca83864.svg",
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "https://media.brand.dev/f27e80a8-06fb-4f08-a77b-777706e5dcb1.png",
+    "dark": "https://media.brand.dev/f27e80a8-06fb-4f08-a77b-777706e5dcb1.png"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/davide-desio-eleva/kirograph"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/davide-desio-eleva/kirograph"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "how-it-works"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/integrations",
+              "guides/configuration",
+              "guides/languages",
+              "guides/semantic-search",
+              "guides/security",
+              "guides/architecture"
+            ]
+          },
+          {
+            "group": "Modules",
+            "pages": [
+              "modules/memory",
+              "modules/wiki",
+              "modules/docs",
+              "modules/data",
+              "modules/token-optimization"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "MCP Tools",
+            "pages": [
+              "reference/mcp-overview",
+              "reference/mcp-core",
+              "reference/mcp-code-health",
+              "reference/mcp-security",
+              "reference/mcp-memory",
+              "reference/mcp-git-context",
+              "reference/mcp-architecture",
+              "reference/mcp-data",
+              "reference/mcp-docs",
+              "reference/mcp-wiki"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "reference/cli-setup",
+              "reference/cli-indexing",
+              "reference/cli-analysis",
+              "reference/cli-security"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

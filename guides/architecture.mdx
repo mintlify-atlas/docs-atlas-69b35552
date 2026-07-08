@@ -1,0 +1,156 @@
+---
+title: "Architecture Analysis: Layers, Coupling, and Snapshots"
+sidebarTitle: "Architecture"
+description: "KiroGraph-Arch detects architectural layers, computes package coupling metrics (Ca, Ce, instability), and lets you diff graph snapshots before and after refactors."
+---
+
+KiroGraph-Arch extends the semantic knowledge graph with a package-level view of your codebase. It detects logical groupings of files (packages), assigns those packages to architectural layers (api, service, data, ui, shared), computes coupling metrics for each package, and stores the results in `kirograph.db` so any MCP tool or CLI command can query them.
+
+---
+
+## Enabling Architecture Analysis
+
+```json
+{ "enableArchitecture": true }
+```
+
+Architecture analysis runs as a dedicated phase during indexing, after code extraction and reference resolution. It writes to `arch_*` tables in `kirograph.db`.
+
+---
+
+## Layer Detection
+
+KiroGraph assigns each file to an architectural layer based on its path. Auto-detected layers and their matching patterns:
+
+| Layer | Matched paths |
+|-------|--------------|
+| `api` | `**/controllers/**`, `**/routes/**`, `**/handlers/**`, `**/api/**` |
+| `service` | `**/services/**`, `**/usecases/**`, `**/domain/**` |
+| `data` | `**/repositories/**`, `**/models/**`, `**/db/**`, `**/migrations/**` |
+| `ui` | `**/components/**`, `**/views/**`, `**/pages/**`, `**/screens/**` |
+| `shared` | `**/utils/**`, `**/helpers/**`, `**/lib/**`, `**/common/**` |
+
+### Custom Layer Definitions
+
+Override or extend the auto-detected patterns using the `architectureLayers` config field:
+
+```json
+{
+  "enableArchitecture": true,
+  "architectureLayers": {
+    "api":     ["src/routes/**", "src/controllers/**"],
+    "service": ["src/domain/**", "src/application/**"],
+    "data":    ["src/infrastructure/**", "src/persistence/**"]
+  }
+}
+```
+
+Custom patterns replace the auto-detected ones for the named layer. Layers not listed in `architectureLayers` continue to use their default patterns.
+
+---
+
+## Package Detection
+
+KiroGraph detects packages in two ways:
+
+**Manifest-based:** Parsed from `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`/`setup.py`, `pom.xml`, `build.gradle`, and `.csproj` files. Produces IDs like `pkg:npm:src/auth`.
+
+**Directory fallback:** For files not covered by any manifest, KiroGraph groups them by their nearest ancestor directory. Produces IDs like `pkg:dir:src/utils`.
+
+When a root manifest covers the entire project, KiroGraph automatically subdivides files into second-level directory packages (e.g. `pkg:dir:src/mcp`, `pkg:dir:src/vectors`) so internal module structure remains visible.
+
+---
+
+## Coupling Metrics
+
+For each package, KiroGraph computes three coupling metrics based on import edges in the graph:
+
+| Metric | Symbol | Meaning |
+|--------|--------|---------|
+| Afferent coupling | **Ca** | How many other packages depend on this one |
+| Efferent coupling | **Ce** | How many packages this one depends on |
+| Instability | **I = Ce / (Ca + Ce)** | Range 0–1. `0` = maximally stable (depended upon, depends on nothing). `1` = maximally unstable (depends on many, depended upon by none). |
+
+High instability in a core package (low in the dependency hierarchy) is a design smell: it means a foundational module has many outgoing dependencies, making it brittle to change. `kirograph_coupling` surfaces these outliers ranked by instability score.
+
+---
+
+## Snapshot Workflow
+
+Take a snapshot of the graph before a refactor, make your changes, then diff the after state against the snapshot to verify the impact:
+
+```bash
+# Before refactoring
+kirograph snapshot --label before-refactor
+
+# ... make your changes ...
+
+# After refactoring
+kirograph diff --snapshot before-refactor
+```
+
+The diff shows nodes added, removed, and changed, plus coupling metric deltas. Use it in code review to confirm that a refactor reduced instability in the target package without introducing new cross-layer dependencies.
+
+<Tip>
+  Pair `kirograph snapshot` with your CI pipeline. Take a snapshot on the base branch and run `kirograph diff` in the PR job to surface unexpected coupling regressions before merge.
+</Tip>
+
+---
+
+## Architecture-Aware Security
+
+`enableSecurity: true` requires `enableArchitecture: true`. When both are active, vulnerability impact summaries include the affected architectural layers — not just the call paths — so you can immediately understand which tier of your application is exposed.
+
+If `enableArchitecture` is not set when `enableSecurity` is enabled, KiroGraph auto-enables it with a warning.
+
+---
+
+## MCP Tools
+
+### `kirograph_architecture`
+
+Returns the full package graph with layer assignments.
+
+**Response fields:**
+
+| Field | Description |
+|-------|-------------|
+| `packages` | Array of package objects: `id`, `name`, `path`, `source` (`manifest` or `directory`), `version` |
+| `layers` | Array of layer objects: `id`, `name`, `patterns` |
+| `packageDeps` | Array of package-to-package dependency edges: `sourcePkg`, `targetPkg`, `depCount` |
+| `layerDeps` | Array of layer-to-layer dependency edges: `sourceLayer`, `targetLayer`, `depCount` |
+| `filePackages` | Map of file path → package IDs |
+| `fileLayers` | Map of file path → `{ layerId, confidence, matchedPattern }` |
+
+### `kirograph_coupling`
+
+Returns coupling metrics for all packages, sorted by instability descending.
+
+**Response fields:**
+
+| Field | Description |
+|-------|-------------|
+| `packageId` | Package identifier |
+| `afferent` | Ca — incoming dependency count |
+| `efferent` | Ce — outgoing dependency count |
+| `instability` | `Ce / (Ca + Ce)`, range 0.0–1.0 |
+
+### `kirograph_package`
+
+Returns details for a specific package including its files, dependencies, and coupling metrics.
+
+---
+
+## Database Tables
+
+Architecture data is stored in `arch_*` tables within `kirograph.db`:
+
+| Table | Contents |
+|-------|---------|
+| `arch_packages` | Package definitions: id, name, path, source, language, version |
+| `arch_layers` | Layer definitions: id, name, patterns |
+| `arch_file_packages` | File → package assignments |
+| `arch_file_layers` | File → layer assignments with confidence score and matched pattern |
+| `arch_package_deps` | Package → package dependency edges with import count |
+| `arch_layer_deps` | Layer → layer dependency edges |
+| `arch_coupling` | Per-package Ca, Ce, and instability metrics |

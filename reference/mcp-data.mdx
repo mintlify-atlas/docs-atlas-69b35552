@@ -1,0 +1,391 @@
+---
+title: "Data Module MCP Tools Reference"
+sidebarTitle: "Data Tools"
+description: "Reference for KiroGraph's 10 data MCP tools for querying CSV, JSON, Excel, Parquet, and PDF files with filters, aggregations, joins, and quality checks."
+---
+
+KiroGraph's data module indexes structured data files alongside your source code so the agent can query rows, compute aggregations, join datasets, and detect quality issues — all without loading raw data into the context window. Every computation runs in SQLite; only the result enters the model's context. All tools require `enableData: true` in `.kirograph/config.json`.
+
+<Info>
+  Supported file formats: CSV, JSON (array-of-objects), Excel (`.xlsx`/`.xls`), Parquet, and PDF (table extraction). Files are discovered automatically during `kirograph index`. Re-run `kirograph data reindex` after adding or updating data files.
+</Info>
+
+<Warning>
+  The hard row cap for `kirograph_data_query` and `kirograph_data_join` is **500 rows**. If you need summary statistics over millions of rows, use `kirograph_data_aggregate` instead — all computation stays in SQLite and only the group results enter the context.
+</Warning>
+
+---
+
+## `kirograph_data_list`
+
+List all indexed datasets with their file paths, formats, row counts, column counts, and sizes. Use this as your first call to discover what data is available and to obtain dataset IDs for subsequent tools.
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_data_list",
+  "arguments": {}
+}
+```
+
+```text title="Example output"
+orders (csv)
+  File: data/orders.csv
+  Rows: 142,500 | Columns: 12 | Size: 8.34 MB
+
+users (csv)
+  File: data/users.csv
+  Rows: 28,000 | Columns: 7 | Size: 1.21 MB
+```
+
+---
+
+## `kirograph_data_describe`
+
+Return a full schema profile for a dataset: column names, inferred types, cardinality, null percentages, min/max values, sample values, and any inferred validation rules. Pass `column` for a deep-dive on a single column.
+
+<ParamField body="dataset" type="string" required>
+  Dataset ID from `kirograph_data_list`.
+</ParamField>
+
+<ParamField body="column" type="string">
+  Column name for a single-column deep-dive (type, cardinality, null rate, min, max, mean, samples).
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+<CodeGroup>
+```json title="Full schema"
+{
+  "tool": "kirograph_data_describe",
+  "arguments": { "dataset": "orders" }
+}
+```
+
+```json title="Single column"
+{
+  "tool": "kirograph_data_describe",
+  "arguments": { "dataset": "orders", "column": "amount" }
+}
+```
+</CodeGroup>
+
+---
+
+## `kirograph_data_query`
+
+Retrieve filtered rows from a dataset. Multiple filters are ANDed together. Supports a rich set of operators and column projection to minimise context usage.
+
+<ParamField body="dataset" type="string" required>
+  Dataset ID from `kirograph_data_list`.
+</ParamField>
+
+<ParamField body="filters" type="array">
+  Array of filter objects: `{ "column": "status", "op": "eq", "value": "active" }`.
+
+  Available operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`, `in`, `is_null`, `between`.
+</ParamField>
+
+<ParamField body="columns" type="string[]">
+  Column projection — only these columns are returned. Defaults to all columns.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum rows to return. Defaults to `100`; hard-capped at `500`.
+</ParamField>
+
+<ParamField body="offset" type="number">
+  Pagination offset. Defaults to `0`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: recent high-value orders"
+{
+  "tool": "kirograph_data_query",
+  "arguments": {
+    "dataset": "orders",
+    "filters": [
+      { "column": "status", "op": "eq", "value": "completed" },
+      { "column": "amount", "op": "gte", "value": 1000 }
+    ],
+    "columns": ["order_id", "user_id", "amount", "created_at"],
+    "limit": 50
+  }
+}
+```
+
+---
+
+## `kirograph_data_aggregate`
+
+Server-side `GROUP BY` aggregation entirely within SQLite — only the group results enter the context window. Essential for summarising large datasets without pagination.
+
+<ParamField body="dataset" type="string" required>
+  Dataset ID from `kirograph_data_list`.
+</ParamField>
+
+<ParamField body="groupBy" type="string[]" required>
+  Columns to group by.
+</ParamField>
+
+<ParamField body="metrics" type="array" required>
+  Array of metric objects: `{ "column": "amount", "op": "sum" }`.
+
+  Available ops: `count`, `sum`, `avg`, `min`, `max`, `count_distinct`.
+</ParamField>
+
+<ParamField body="filters" type="array">
+  Pre-aggregation row filters (same format as `kirograph_data_query`).
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: total revenue per status"
+{
+  "tool": "kirograph_data_aggregate",
+  "arguments": {
+    "dataset": "orders",
+    "groupBy": ["status"],
+    "metrics": [
+      { "column": "amount", "op": "sum" },
+      { "column": "order_id", "op": "count" }
+    ]
+  }
+}
+```
+
+```text title="Example output"
+status | sum(amount) | count(order_id)
+--- | --- | ---
+completed | 4821300.00 | 98200
+refunded | 43200.00 | 720
+pending | 182000.00 | 3580
+```
+
+---
+
+## `kirograph_data_search`
+
+Search column names and sample values within a dataset by keyword. Useful for discovering which columns hold a particular type of data when you don't know the schema upfront.
+
+<ParamField body="dataset" type="string" required>
+  Dataset ID from `kirograph_data_list`.
+</ParamField>
+
+<ParamField body="query" type="string" required>
+  Search keyword to match against column names and sample values.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: find columns related to email"
+{
+  "tool": "kirograph_data_search",
+  "arguments": { "dataset": "users", "query": "email" }
+}
+```
+
+---
+
+## `kirograph_data_join`
+
+SQL JOIN across two indexed datasets using a shared key column. Results are capped at 500 rows; use `columns` projection to control context size.
+
+<ParamField body="left" type="string" required>
+  Left dataset ID.
+</ParamField>
+
+<ParamField body="right" type="string" required>
+  Right dataset ID.
+</ParamField>
+
+<ParamField body="leftColumn" type="string" required>
+  Join column from the left dataset.
+</ParamField>
+
+<ParamField body="rightColumn" type="string" required>
+  Join column from the right dataset.
+</ParamField>
+
+<ParamField body="type" type="string">
+  Join type: `inner` (default), `left`, or `right`.
+</ParamField>
+
+<ParamField body="columns" type="string[]">
+  Column projection. Prefix column names with the dataset ID to disambiguate (e.g. `orders.amount`).
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum rows. Hard-capped at `500`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: join orders with users"
+{
+  "tool": "kirograph_data_join",
+  "arguments": {
+    "left": "orders",
+    "right": "users",
+    "leftColumn": "user_id",
+    "rightColumn": "id",
+    "type": "inner",
+    "columns": ["orders.order_id", "users.email", "orders.amount"],
+    "limit": 100
+  }
+}
+```
+
+---
+
+## `kirograph_data_correlations`
+
+Compute pairwise Pearson correlations between all numeric columns in a dataset. Only pairs with an absolute correlation above `threshold` are returned.
+
+<ParamField body="dataset" type="string" required>
+  Dataset ID from `kirograph_data_list`.
+</ParamField>
+
+<ParamField body="threshold" type="number">
+  Minimum absolute correlation to include. Defaults to `0.3`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: strong correlations in orders"
+{
+  "tool": "kirograph_data_correlations",
+  "arguments": { "dataset": "orders", "threshold": 0.5 }
+}
+```
+
+```text title="Example output"
+Correlations for "orders" (threshold: 0.5):
+
+amount ↔ item_count: +0.7812 (strong)
+discount ↔ amount: -0.5234 (moderate)
+```
+
+---
+
+## `kirograph_data_quality`
+
+Data quality triage: ranks columns by a composite risk score derived from null rates, cardinality anomalies, and type mismatches. Returns only the columns with issues.
+
+<ParamField body="dataset" type="string" required>
+  Dataset ID from `kirograph_data_list`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_data_quality",
+  "arguments": { "dataset": "orders" }
+}
+```
+
+```text title="Example output"
+Quality report for "orders" (3 columns with issues):
+
+shipping_address (risk: 42%): 42% null values; low cardinality anomaly
+promo_code (risk: 28%): 28% null values
+discount (risk: 15%): type mismatch — mixed integer and float values
+```
+
+---
+
+## `kirograph_data_drift`
+
+Detect schema drift by comparing the current dataset profile against the most recently recorded snapshot. Reports added/removed columns, type changes, and row count deltas.
+
+<ParamField body="dataset" type="string" required>
+  Dataset ID from `kirograph_data_list`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_data_drift",
+  "arguments": { "dataset": "orders" }
+}
+```
+
+---
+
+## Complete Data Exploration Example
+
+A typical workflow to understand a new dataset before writing analysis code:
+
+<Steps>
+  <Step title="Discover available datasets">
+    ```json
+    { "tool": "kirograph_data_list", "arguments": {} }
+    ```
+  </Step>
+
+  <Step title="Profile the schema">
+    ```json
+    {
+      "tool": "kirograph_data_describe",
+      "arguments": { "dataset": "orders" }
+    }
+    ```
+
+    Review column types, null rates, and cardinality to spot anomalies before querying.
+  </Step>
+
+  <Step title="Check data quality">
+    ```json
+    {
+      "tool": "kirograph_data_quality",
+      "arguments": { "dataset": "orders" }
+    }
+    ```
+
+    Address high-risk columns before building aggregations that depend on them.
+  </Step>
+
+  <Step title="Aggregate instead of paginating">
+    ```json
+    {
+      "tool": "kirograph_data_aggregate",
+      "arguments": {
+        "dataset": "orders",
+        "groupBy": ["status", "region"],
+        "metrics": [
+          { "column": "amount", "op": "sum" },
+          { "column": "order_id", "op": "count" }
+        ]
+      }
+    }
+    ```
+
+    All computation happens in SQLite — only the summary rows reach the model.
+  </Step>
+</Steps>
+
+<Tip>
+  If you find yourself calling `kirograph_data_query` with incrementing `offset` values, switch to `kirograph_data_aggregate`. KiroGraph will warn you automatically when it detects a pagination loop.
+</Tip>

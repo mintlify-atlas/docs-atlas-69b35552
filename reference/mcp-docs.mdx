@@ -1,0 +1,283 @@
+---
+title: "Documentation Module MCP Tools Reference"
+sidebarTitle: "Docs Tools"
+description: "Reference for KiroGraph's 5 documentation MCP tools for section-level retrieval from Markdown, MDX, RST, AsciiDoc, and OpenAPI files with 92–97% token savings."
+---
+
+KiroGraph's docs module indexes your project's written documentation alongside the code graph, making it queryable at section granularity. Instead of loading entire files, the agent retrieves only the sections it needs — achieving **92–97% token savings** on typical doc-heavy codebases. All tools require `enableDocs: true` in `.kirograph/config.json` and a completed `kirograph index` run.
+
+<Info>
+  Supported formats: Markdown (`.md`), MDX (`.mdx`), reStructuredText (`.rst`), AsciiDoc (`.adoc`), and OpenAPI specs (`.yaml`/`.json`). Sections are split at heading boundaries and addressed by stable byte-offset-derived IDs.
+</Info>
+
+---
+
+## Stable Section IDs
+
+Every indexed section receives a **stable ID** — a deterministic string derived from the file path and the byte offset of the heading in the source file. Because the ID is based on the raw file position rather than the heading text, it survives reformatting and minor edits to the heading wording.
+
+The ID format is: `<sha8-of-filepath>:<byte-offset-hex>`, for example `a3f1c820:00001a40`.
+
+Stable IDs are returned by `kirograph_docs_toc`, `kirograph_docs_search`, and `kirograph_docs_outline`. Pass them directly to `kirograph_docs_section` to retrieve the full section content without re-running a search query.
+
+---
+
+## `kirograph_docs_toc`
+
+Get the table of contents for the entire project or a specific file. Each entry includes the heading text, heading level, file path, section summary (when available), and the stable section ID.
+
+<ParamField body="file" type="string">
+  Filter to a specific doc file. Omit for a project-wide TOC.
+</ParamField>
+
+<ParamField body="tree" type="boolean">
+  Return a nested tree structure (children nested under parent headings). Defaults to `false` (flat list).
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+<CodeGroup>
+```json title="Project-wide flat TOC"
+{
+  "tool": "kirograph_docs_toc",
+  "arguments": {}
+}
+```
+
+```json title="Nested tree for one file"
+{
+  "tool": "kirograph_docs_toc",
+  "arguments": {
+    "file": "docs/architecture/overview.md",
+    "tree": true
+  }
+}
+```
+</CodeGroup>
+
+```text title="Example output (flat)"
+## Authentication [docs/auth.md]
+  ID: a3f1c820:00001a40
+
+### JWT Strategy [docs/auth.md]
+  ID: a3f1c820:00002b80
+
+### Session Cookies [docs/auth.md]
+  ID: a3f1c820:00003c10
+```
+
+---
+
+## `kirograph_docs_search`
+
+Search documentation sections by a natural-language query or keyword. Uses full-text search (FTS) and, when a vector engine is configured, semantic search as a fallback. Returns sections ranked by relevance with their summaries and stable IDs.
+
+<ParamField body="query" type="string" required>
+  Natural-language or keyword search query.
+</ParamField>
+
+<ParamField body="file" type="string">
+  Narrow the search to a specific doc file.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Maximum sections to return. Defaults to `10`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: find sections about rate limiting"
+{
+  "tool": "kirograph_docs_search",
+  "arguments": {
+    "query": "rate limiting configuration",
+    "limit": 5
+  }
+}
+```
+
+```text title="Example output"
+1. Rate Limiting [docs/api/limits.md]
+   Configure per-endpoint rate limits using the sliding window algorithm.
+   ID: b7e2d140:00004f20
+
+2. Global Rate Limit Middleware [docs/api/middleware.md]
+   Apply a global limit before route handlers with applyRateLimit().
+   ID: c1a9e380:000081a0
+```
+
+---
+
+## `kirograph_docs_section`
+
+Retrieve the full content of a documentation section by its stable ID. This is the token-efficient retrieval path: you first scan the TOC or run a search to find section IDs, then fetch only the sections you need. Pass `context: true` to include the ancestor heading chain and child section summaries alongside the content.
+
+<ParamField body="id" type="string" required>
+  Stable section ID from `kirograph_docs_toc`, `kirograph_docs_search`, or `kirograph_docs_outline`.
+</ParamField>
+
+<ParamField body="context" type="boolean">
+  When `true`, includes the breadcrumb (ancestor headings) and a list of immediate child sections with their summaries. Defaults to `false`.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example: fetch a section by ID"
+{
+  "tool": "kirograph_docs_section",
+  "arguments": {
+    "id": "b7e2d140:00004f20",
+    "context": true
+  }
+}
+```
+
+```text title="Example output (with context: true)"
+Breadcrumb: API Reference > Rate Limiting
+
+## Rate Limiting
+
+Configure per-endpoint rate limits using the sliding window algorithm.
+Each endpoint can define its own `rateLimit` option:
+
+```ts
+router.get('/search', { rateLimit: { max: 30, window: '1m' } }, handler)
+```
+
+## Child sections:
+  - Configuring Headers — return `X-RateLimit-*` headers (ID: b7e2d140:00006200)
+  - Per-user vs Global limits (ID: b7e2d140:000078c0)
+```
+
+---
+
+## `kirograph_docs_outline`
+
+Get the complete heading hierarchy for a single documentation file as a nested tree. Lighter than the full TOC when you only need the structure of one file.
+
+<ParamField body="file" type="string" required>
+  Relative path to the documentation file.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+```json title="Example"
+{
+  "tool": "kirograph_docs_outline",
+  "arguments": { "file": "docs/api/limits.md" }
+}
+```
+
+```text title="Example output"
+Outline: docs/api/limits.md
+
+# API Rate Limiting
+  ## Rate Limiting — configure per-endpoint limits
+    ### Configuring Headers
+    ### Per-user vs Global limits
+  ## Burst Allowance
+  ## Error Responses
+```
+
+---
+
+## `kirograph_docs_refs`
+
+Bidirectional cross-reference lookup. Given a **section ID**, returns the code symbols that section references. Given a **symbol qualified name**, returns the documentation sections that mention it — with relevance scores. This is the bridge between the graph and the docs index.
+
+<ParamField body="sectionId" type="string">
+  Section ID — returns code symbols referenced by this section.
+</ParamField>
+
+<ParamField body="nodeId" type="string">
+  Code symbol qualified name — returns documentation sections that reference this symbol.
+</ParamField>
+
+<ParamField body="projectPath" type="string">
+  Project root path. Defaults to the current working directory.
+</ParamField>
+
+<Note>
+  Provide either `sectionId` or `nodeId`, not both. Providing neither returns an error.
+</Note>
+
+<CodeGroup>
+```json title="Code symbols referenced by a section"
+{
+  "tool": "kirograph_docs_refs",
+  "arguments": { "sectionId": "b7e2d140:00004f20" }
+}
+```
+
+```json title="Doc sections that mention a symbol"
+{
+  "tool": "kirograph_docs_refs",
+  "arguments": { "nodeId": "RateLimitMiddleware.apply" }
+}
+```
+</CodeGroup>
+
+```text title="Example output (nodeId lookup)"
+[mention] ← Rate Limiting (confidence: 0.92)
+[example] ← Middleware Configuration (confidence: 0.81)
+[api_ref] ← applyRateLimit API (confidence: 0.76)
+```
+
+---
+
+## Token-Efficient Retrieval Pattern
+
+The typical three-step workflow uses only the content you need, never loading full documentation files:
+
+<Steps>
+  <Step title="Search or browse for relevant sections">
+    Run a semantic search to find section IDs without fetching content:
+
+    ```json
+    {
+      "tool": "kirograph_docs_search",
+      "arguments": { "query": "authentication middleware options", "limit": 5 }
+    }
+    ```
+
+    Note the section IDs from the results (e.g. `a3f1c820:00001a40`).
+  </Step>
+
+  <Step title="Fetch only the sections you need">
+    Retrieve the content of a specific section by its stable ID — no full-file load:
+
+    ```json
+    {
+      "tool": "kirograph_docs_section",
+      "arguments": { "id": "a3f1c820:00001a40", "context": true }
+    }
+    ```
+
+    A 200-section documentation file might be 180 KB; the targeted section is typically 800–2 000 bytes.
+  </Step>
+
+  <Step title="Bridge to the code graph">
+    Check which code symbols the section references to jump directly to the implementation:
+
+    ```json
+    {
+      "tool": "kirograph_docs_refs",
+      "arguments": { "sectionId": "a3f1c820:00001a40" }
+    }
+    ```
+
+    Then use `kirograph_node` to fetch the implementation of any referenced symbol.
+  </Step>
+</Steps>
+
+<Tip>
+  Use `kirograph_docs_outline` instead of `kirograph_docs_toc` when you already know which file to look at — it's faster and returns a clean nested tree without project-wide noise.
+</Tip>

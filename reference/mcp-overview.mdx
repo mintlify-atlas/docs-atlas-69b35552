@@ -1,0 +1,150 @@
+---
+title: "KiroGraph MCP Tools: Complete Overview"
+sidebarTitle: "Overview"
+description: "KiroGraph exposes up to 126 MCP tools across 19 feature flags. This overview covers tool groupings, token costs, and how to enable each module."
+---
+
+KiroGraph's MCP server provides a structured interface that lets AI agents — including Kiro IDE's built-in agent — query the code knowledge graph directly. Rather than reading source files, the agent calls typed tools that return pre-structured, token-optimized answers: symbol lookups, blast-radius analyses, vulnerability reports, memory observations, and more. The server starts automatically when you open a project in Kiro after installation, or you can start it manually with `kirograph serve --mcp`.
+
+## Starting the MCP Server
+
+In Kiro IDE the server is launched automatically by the installer. For other MCP clients, add KiroGraph to your MCP configuration and point it at your project:
+
+```bash
+kirograph serve --mcp
+```
+
+The server registers tools dynamically based on the feature flags in `.kirograph/config.json`. Disabled flags reduce the tool list (and the `autoApprove` entry) to keep the agent's context lean.
+
+## Token Budget by Feature Flag
+
+Every tool that appears in the `tools/list` response costs tokens in the agent's system prompt. The table below shows the approximate cost of enabling each feature set. The totals assume all flags are `true`.
+
+| Flag | Tools | ~Tokens |
+|------|------:|--------:|
+| core (always-on) | 3 | ~170 |
+| `enableNavigation` | 3 | ~120 |
+| `enableMemory` | 16 | ~746 |
+| `enableSecurity` | 15 | ~675 |
+| `enableData` | 10 | ~519 |
+| `enableWiki` | 10 | ~319 |
+| `enableCodeHealth` | 25 | ~935 |
+| `enableDocs` | 5 | ~241 |
+| `enableAgentUtils` | 4 | ~278 |
+| `enableArchitecture` | 5 | ~205 |
+| `enableWatchmen` | 3 | ~140 |
+| `enablePatterns` | 3 | ~93 |
+| `trackCallSites` | 2 | ~84 |
+| `enableGitContext` | 7 | ~410 |
+| `enableComplexity` | 5 | ~660 |
+| `enableEditPrimitives` | 5 | ~280 |
+| `enableBranch` | 3 | ~300 |
+| `enableShellExec` | 1 | ~71 |
+| `enableGeneralCompression` | 1 | ~68 |
+| **Total** | **126** | **~6,240** |
+
+<Tip>
+  Start with only the flags your workflow needs. A project that only uses core
+  navigation and code-health analysis can stay under 2,000 tokens of tool
+  overhead — well within every major model's context budget.
+</Tip>
+
+## Auto-Approval in Kiro IDE
+
+After installation, Kiro auto-approves all KiroGraph tools so the agent never pauses for confirmation. The installer writes the following `autoApprove` list into `.kiro/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "kirograph": {
+      "command": "node",
+      "args": ["/path/to/kirograph/dist/mcp/server.js"],
+      "autoApprove": [
+        "kirograph_context",
+        "kirograph_search",
+        "kirograph_node",
+        "kirograph_status",
+        "kirograph_files",
+        "kirograph_callers",
+        "kirograph_callees",
+        "kirograph_impact",
+        "kirograph_path",
+        "kirograph_hotspots",
+        "kirograph_dead_code",
+        "kirograph_circular_deps",
+        "kirograph_diff",
+        "kirograph_exec",
+        "kirograph_gain",
+        "kirograph_mem_search",
+        "kirograph_mem_store",
+        "kirograph_vulns",
+        "kirograph_security"
+      ]
+    }
+  }
+}
+```
+
+Only the flags you enable contribute tools to the `autoApprove` list. The installer trims the list automatically when a flag is `false`.
+
+<Info>
+  KiroGraph tools carry two MCP protocol annotations. `readOnlyHint: true` is
+  set on all graph-query tools to signal that they do not modify project files —
+  MCP clients can use this to apply looser confirmation policies. Tools in
+  `enableEditPrimitives` and `enableShellExec` are explicitly marked
+  `readOnlyHint: false`. The `alwaysLoad: true` annotation on the core tool set
+  tells compliant clients to include those tool definitions in every context
+  window, even when tool use is otherwise disabled.
+</Info>
+
+## Tool Groups at a Glance
+
+<CardGroup cols={2}>
+  <Card title="Core & Navigation" icon="magnifying-glass" href="/reference/mcp-core">
+    Always-on context builder, symbol search, caller/callee traversal, status, and file listing. Start here.
+  </Card>
+  <Card title="Code Health" icon="heart-pulse" href="/reference/mcp-code-health">
+    Dead code, circular deps, hotspots, type hierarchies, snapshots, complexity analysis, branch diffs, and edit primitives.
+  </Card>
+  <Card title="Security" icon="shield-halved" href="/reference/mcp-security">
+    Vulnerability scanning with EPSS scores, attack surface mapping, secrets detection, SBOM/VEX export, SAST, and supply chain health.
+  </Card>
+  <Card title="Memory" icon="brain" href="/reference/mcp-memory">
+    Persistent project memory: store decisions, search observations, manage conflicts, review stale facts, and trigger Watchmen synthesis.
+  </Card>
+  <Card title="Git Context" icon="code-branch" href="/reference/mcp-git-context">
+    Semantic diffs, commit context, PR descriptions, changelog generation, test mapping, and coverage parsing.
+  </Card>
+  <Card title="Architecture" icon="diagram-project" href="/reference/mcp-architecture">
+    Package and layer detection, coupling metrics (Ca/Ce/instability), community detection, and manifest inspection.
+  </Card>
+  <Card title="Data" icon="database" href="/reference/mcp-data">
+    Indexed dataset queries, aggregation, joins, Pearson correlations, quality triage, and drift detection.
+  </Card>
+  <Card title="Docs & Wiki" icon="book-open" href="/reference/mcp-docs">
+    Documentation TOC, search, section retrieval, code↔doc cross-references, wiki ingestion, and synthesis.
+  </Card>
+</CardGroup>
+
+## Minimal Configuration Example
+
+Enable the most commonly used features in `.kirograph/config.json`:
+
+```json
+{
+  "enableNavigation": true,
+  "enableCodeHealth": true,
+  "enableGitContext": true,
+  "enableSecurity": true,
+  "enableArchitecture": true,
+  "enableMemory": false,
+  "enableShellExec": true,
+  "trackCallSites": true
+}
+```
+
+<Note>
+  `enableSecurity` also requires `enableArchitecture: true` because security
+  reachability analysis traverses the architecture layer graph. Both flags must
+  be set for security tools to appear in the tool list.
+</Note>

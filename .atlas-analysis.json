@@ -1,0 +1,123 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "KiroGraph",
+  "projectDescription": "A semantic code knowledge graph MCP server and CLI tool for Kiro that pre-indexes your codebase into a local SQLite graph so AI agents can answer symbol queries, trace call paths, and analyze impact in a single tool call instead of dozens of file reads.",
+  "theme": "luma",
+  "primaryColor": "#9344fb",
+  "lightColor": "#e1d3f4",
+  "darkColor": "#090909",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "how-it-works"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/integrations",
+              "guides/configuration",
+              "guides/languages",
+              "guides/semantic-search",
+              "guides/security",
+              "guides/architecture"
+            ]
+          },
+          {
+            "group": "Modules",
+            "pages": [
+              "modules/memory",
+              "modules/wiki",
+              "modules/docs",
+              "modules/data",
+              "modules/token-optimization"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "MCP Tools",
+            "pages": [
+              "reference/mcp-overview",
+              "reference/mcp-core",
+              "reference/mcp-code-health",
+              "reference/mcp-security",
+              "reference/mcp-memory",
+              "reference/mcp-git-context",
+              "reference/mcp-architecture",
+              "reference/mcp-data",
+              "reference/mcp-docs",
+              "reference/mcp-wiki"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "reference/cli-setup",
+              "reference/cli-indexing",
+              "reference/cli-analysis",
+              "reference/cli-security"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Semantic code knowledge graph backed by tree-sitter AST parsing across 33+ languages stored in local SQLite",
+    "Single MCP tool call replaces dozens of file-read tool calls for symbol lookups, call graphs, and impact analysis",
+    "9 pluggable semantic search engines including TurboQuant (20-30x embedding compression) and TurboVec (Rust/SIMD)",
+    "Persistent cross-session memory with conflict detection, stale review, and symbol-linked observations",
+    "Reachability-aware security analysis: determines if vulnerable dependency code is actually reachable from entry points",
+    "Architecture layer detection with coupling metrics (Ca/Ce/instability) and snapshot diffing",
+    "Auto-detects and integrates with 35 MCP-capable tools (Cursor, Claude Code, Copilot, Windsurf, Cline, and more)",
+    "Token optimization: shell compression (60-90% savings), prose compression (Caveman mode), and file read caching",
+    "LLM wiki (Karpathy-style) for compounding knowledge across sessions",
+    "100% local — no API keys, no external services, nothing leaves your machine"
+  ],
+  "publicApiSurface": [
+    "kirograph install [--target <tool>] [--all]",
+    "kirograph init [path] [--index]",
+    "kirograph index [path] [--force]",
+    "kirograph sync [path]",
+    "kirograph query <term> [--kind <kind>] [--limit <n>]",
+    "kirograph context <description>",
+    "kirograph affected <files>",
+    "kirograph status [path]",
+    "kirograph uninit [path] [--force]",
+    "kirograph serve --mcp",
+    "kirograph_context(task, maxNodes, detail, projectPath)",
+    "kirograph_search(query, kind, limit, projectPath)",
+    "kirograph_callers(symbol, limit, projectPath)",
+    "kirograph_callees(symbol, limit, projectPath)",
+    "kirograph_impact(symbol, depth, projectPath)",
+    "kirograph_node(symbol, detail, projectPath)",
+    "kirograph_type_hierarchy(symbol, direction, projectPath)",
+    "kirograph_path(from, to, projectPath)",
+    "kirograph_dead_code(limit, projectPath)",
+    "kirograph_circular_deps(projectPath)",
+    "kirograph_files(filterPath, pattern, maxDepth, format, projectPath)",
+    "kirograph_status(projectPath)",
+    "kirograph_hotspots(limit, projectPath)",
+    "kirograph_surprising(limit, projectPath)",
+    "kirograph_diff(snapshot, projectPath)",
+    "kirograph_exec(command, cwd, level, timeout, projectPath)",
+    "kirograph_mem_store(content, kind, projectPath)",
+    "kirograph_mem_search(query, projectPath)",
+    "kirograph_architecture(projectPath)",
+    "kirograph_coupling(projectPath)",
+    "kirograph_vulns(projectPath)",
+    "kirograph_read(path, mode)",
+    "kirograph_compress(text, command, level)"
+  ]
+}

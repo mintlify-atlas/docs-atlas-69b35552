@@ -1,0 +1,347 @@
+---
+title: "CLI Analysis Commands: query, context, affected, snapshot"
+sidebarTitle: "Analysis Commands"
+description: "Reference for KiroGraph CLI analysis commands: symbol search, context building, affected test finding, graph traversal, and snapshot management with all flags."
+---
+
+Once the graph is indexed you can query it directly from the terminal — without starting a full AI session. The analysis commands cover symbol search, semantic context building, dependency traversal, dead-code detection, blast-radius analysis, and point-in-time snapshots. All commands accept the `kg` short alias.
+
+---
+
+## `kirograph query`
+
+Searches for symbols in the indexed graph by name. Without extra flags this performs a prefix/substring match against all symbol names. Pass `--qualified` for an exact qualified-name lookup, or `--similar` for fuzzy/embedding-based search (requires `enableEmbeddings: true`).
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--kind <kind>` | Filter results to a specific symbol kind | — |
+| `--limit <n>` | Maximum number of results to return | `10` |
+| `--qualified` | Treat the search term as a fully-qualified name (exact match) | false |
+| `--similar` | Use fuzzy/vector similarity matching for broader results | false |
+
+### Supported `--kind` values
+
+`function`, `method`, `class`, `struct`, `interface`, `trait`, `protocol`, `enum`, `type_alias`, `property`, `field`, `variable`, `constant`, `enum_member`, `parameter`, `import`, `export`, `route`, `component`, `file`, `module`, `namespace`
+
+### Examples
+
+```bash
+# Search for any symbol containing "auth"
+kirograph query auth
+
+# Find only classes matching "Controller"
+kirograph query Controller --kind class
+
+# Return up to 20 results
+kirograph query payment --limit 20
+
+# Exact qualified-name lookup
+kirograph query "src/auth/middleware.ts::validateToken" --qualified
+
+# Fuzzy similarity search
+kirograph query "retry logic" --similar
+
+# Short alias
+kg query parseUser --kind function
+```
+
+---
+
+## `kirograph context`
+
+Builds a focused snapshot of code context for a natural-language task description. It identifies the most relevant symbols in the graph, ranks them by relevance, and outputs either Markdown or JSON — mirroring the `kirograph_context` MCP tool used by the agent automatically during sessions.
+
+### Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--max-nodes <n>` | Maximum number of symbols to include | `20` |
+| `--format <fmt>` | `markdown` \| `json` | `markdown` |
+| `--no-code` | Exclude source code snippets from the output | false |
+
+### Examples
+
+```bash
+# Build context for a task
+kirograph context "fix checkout bug"
+
+# More symbols, JSON output
+kirograph context "add user authentication" --format json --max-nodes 30
+
+# Context without full source snippets (faster, smaller output)
+kirograph context "validate token" --no-code
+
+kg context "refactor payment service" --max-nodes 40
+```
+
+---
+
+## `kirograph affected`
+
+Finds test files that depend — directly or transitively — on a given set of changed source files. This is the primary tool for running only the tests that matter in CI. File paths are resolved through the dependency graph up to `--depth` hops.
+
+### Flags
+
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--stdin` | | Read the changed file list from stdin, one path per line | false |
+| `--depth <n>` | `-d` | Maximum dependency traversal depth | `5` |
+| `--filter <glob>` | `-f` | Custom glob pattern to identify test files | auto-detect |
+| `--json` | `-j` | Output as JSON `{ changedFiles, affectedTests }` | false |
+| `--quiet` | `-q` | Output file paths only (one per line) — useful for shell scripting | false |
+| `--path <path>` | `-p` | Project root path | `cwd` |
+
+### Examples
+
+```bash
+# Pass changed files as arguments
+kirograph affected src/utils.ts src/api.ts
+
+# Pipe from git diff (typical CI usage)
+git diff --name-only | kirograph affected --stdin
+
+# JSON output
+kirograph affected --stdin --json < changed.txt
+
+# Custom test glob (e.g. include e2e tests)
+kirograph affected src/auth.ts --filter "e2e/**"
+
+# Paths only, shallow traversal — for shell variable capture
+kirograph affected src/lib.ts --depth 3 --quiet
+
+kg affected src/payments.ts --json
+```
+
+### CI integration example
+
+<CodeGroup>
+
+```yaml GitHub Actions
+name: Targeted tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Find affected tests
+        id: affected
+        run: |
+          AFFECTED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            | kirograph affected --stdin --quiet)
+          echo "files=$AFFECTED" >> $GITHUB_OUTPUT
+
+      - name: Run affected tests
+        if: steps.affected.outputs.files != ''
+        run: npx vitest run ${{ steps.affected.outputs.files }}
+```
+
+```bash Shell script
+#!/usr/bin/env bash
+AFFECTED=$(git diff --name-only HEAD | kirograph affected --stdin --quiet)
+if [ -n "$AFFECTED" ]; then
+  npx vitest run $AFFECTED
+fi
+```
+
+</CodeGroup>
+
+---
+
+## `kirograph snapshot`
+
+Saves or diffs point-in-time snapshots of the graph. Snapshots record the full set of symbols and edges at a given moment so you can measure structural drift across refactors, PRs, or releases.
+
+### Subcommands
+
+| Subcommand | Description |
+|------------|-------------|
+| `kirograph snapshot save [label]` | Save the current graph state with an optional label |
+| `kirograph snapshot list` | List all saved snapshots |
+| `kirograph snapshot diff [label]` | Diff the current graph against a saved snapshot |
+
+### Flags for `snapshot diff`
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--format <fmt>` | `summary` \| `full` \| `json` | `summary` |
+| `--path <p>` | Project root path | `cwd` |
+
+### Examples
+
+```bash
+# Save a named snapshot before a refactor
+kirograph snapshot save pre-refactor
+
+# Unnamed snapshot (auto-labelled with timestamp)
+kirograph snapshot save
+
+# List all snapshots
+kirograph snapshot list
+
+# Diff against the latest snapshot
+kirograph snapshot diff
+
+# Diff against a named snapshot
+kirograph snapshot diff pre-refactor
+
+# Full diff showing added/removed symbol lists
+kirograph snapshot diff pre-refactor --format full
+
+# JSON output for tooling
+kirograph snapshot diff --format json
+
+kg snapshot save before-merge
+```
+
+---
+
+## Graph traversal commands
+
+These commands traverse the dependency graph starting from a named symbol. All accept a `-p / --path` option and `-j / --json` for machine-readable output where not otherwise noted.
+
+### `kirograph callers`
+
+Lists every symbol that calls a given function or method.
+
+```bash
+kirograph callers validateToken
+kirograph callers validateToken --limit 50
+kirograph callers validateToken --json
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--limit <n>` | Max results | `20` |
+| `-j, --json` | JSON output | false |
+| `-p, --path <path>` | Project path | `cwd` |
+
+### `kirograph callees`
+
+Lists every symbol called by a given function or method.
+
+```bash
+kirograph callees processPayment
+kirograph callees processPayment --limit 30 --json
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--limit <n>` | Max results | `20` |
+| `-j, --json` | JSON output | false |
+| `-p, --path <path>` | Project path | `cwd` |
+
+### `kirograph impact`
+
+Shows all symbols that would be affected by changing a given symbol — a blast-radius view.
+
+```bash
+kirograph impact DatabasePool
+kirograph impact DatabasePool --depth 4
+kirograph impact DatabasePool --json
+```
+
+| Flag | Short | Description | Default |
+|------|-------|-------------|---------|
+| `--depth <n>` | `-d` | Max traversal depth | `2` |
+| `--json` | `-j` | JSON output | false |
+| `--path <path>` | `-p` | Project path | `cwd` |
+
+### `kirograph path`
+
+Finds the shortest dependency path between two symbols.
+
+```bash
+kirograph path LoginController DatabasePool
+kirograph path LoginController DatabasePool --format json
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--format <fmt>` | `table` \| `json` | `table` |
+
+### `kirograph dead-code`
+
+Lists unexported symbols with no incoming references — candidates for deletion.
+
+```bash
+kirograph dead-code
+kirograph dead-code --limit 20
+kirograph dead-code --format json
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--limit <n>` | Max results | `50` |
+| `--format <fmt>` | `table` \| `json` | `table` |
+
+### `kirograph circular-deps`
+
+Finds all circular dependency cycles in the codebase.
+
+```bash
+kirograph circular-deps
+kirograph circular-deps --json
+```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--json` | `-j` | JSON output |
+
+### `kirograph hotspots`
+
+Lists the most-connected symbols by edge degree — the nodes with the highest combined caller + callee count.
+
+```bash
+kirograph hotspots
+kirograph hotspots --limit 10
+kirograph hotspots --format json
+kirograph hotspots --security   # sort by severity × caller count
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--limit <n>` | Max results | `20` |
+| `--format <fmt>` | `table` \| `json` | `table` |
+| `--security` | Show only symbols with pattern matches, sorted by severity × caller count | false |
+
+### `kirograph type-hierarchy`
+
+Traverses the inheritance or implementation hierarchy of a class or interface.
+
+```bash
+kirograph type-hierarchy BaseController
+kirograph type-hierarchy BaseController --direction down
+kirograph type-hierarchy BaseController --direction up --json
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--direction <dir>` | `up` (base types) \| `down` (derived types) \| `both` | `both` |
+| `--json` | `-j` | JSON output |
+| `--path <path>` | `-p` | Project path | `cwd` |
+
+---
+
+## `kirograph dashboard`
+
+Opens an interactive browser-based graph visualisation. Requires `semanticEngine` set to `qdrant` or `typesense` in `config.json`.
+
+```bash
+# Start the engine server and open the dashboard
+kirograph dashboard start
+
+# Stop the running engine server
+kirograph dashboard stop
+```
+
+The dashboard provides node clustering, shortest-path finding, symbol search, and graph analytics. It is not available when using the default `turboquant` engine.

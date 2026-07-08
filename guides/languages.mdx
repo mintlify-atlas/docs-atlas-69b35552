@@ -1,0 +1,144 @@
+---
+title: "Supported Languages and Frameworks in KiroGraph"
+sidebarTitle: "Languages"
+description: "KiroGraph uses tree-sitter to parse 33+ languages including TypeScript, Python, Go, Rust, Java, and supports React, Angular, Vue, Express, Django, and more frameworks."
+---
+
+KiroGraph parses source files using [tree-sitter](https://tree-sitter.github.io/tree-sitter/) WASM grammars that are bundled with the package. No native build step, no platform-specific binaries, and no system-level dependencies are required — the grammars work in any Node.js environment including CI runners, containers, and ARM machines.
+
+<Info>
+  Setting `"languages": []` (the default) tells KiroGraph to index all supported languages. Provide an explicit list only if you want to restrict indexing to a subset of the codebase.
+</Info>
+
+---
+
+## General-Purpose Languages
+
+| Language | Extensions |
+|----------|-----------|
+| TypeScript | `.ts` |
+| JavaScript | `.js` |
+| TSX | `.tsx` |
+| JSX | `.jsx` |
+| Python | `.py` |
+| Go | `.go` |
+| Rust | `.rs` |
+| Java | `.java` |
+| C | `.c`, `.h` |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp` |
+| C# | `.cs` |
+| PHP | `.php` |
+| Ruby | `.rb` |
+| Swift | `.swift` |
+| Kotlin | `.kt` |
+| Dart | `.dart` |
+| Scala | `.scala`, `.sc`, `.sbt` |
+| Lua | `.lua` |
+| Zig | `.zig`, `.zon` |
+| Bash | `.sh`, `.bash`, `.zsh` |
+| OCaml | `.ml`, `.mli` |
+| Elm | `.elm` |
+| Objective-C | `.m` |
+
+---
+
+## Frontend & UI
+
+| Language | Extensions |
+|----------|-----------|
+| React / React Native | `.tsx`, `.jsx` (via TypeScript/JSX grammars) |
+| Next.js | `.tsx`, `.jsx` (via TypeScript/JSX grammars) |
+| Angular | `.ts`, `.html` (via TypeScript/HTML grammars) |
+| Svelte | `.svelte` |
+| Vue | `.vue` |
+| HTML | `.html`, `.htm` |
+| CSS | `.css` |
+| SCSS / Sass | `.scss`, `.sass` |
+
+---
+
+## Domain-Specific Languages
+
+| Language | Domain | Extensions |
+|----------|--------|-----------|
+| Solidity | Blockchain / Web3 | `.sol` |
+| Elixir | Distributed systems / Real-time | `.ex`, `.exs` |
+
+---
+
+## Configuration & Infrastructure
+
+| Language | Extensions |
+|----------|-----------|
+| YAML | `.yaml`, `.yml` |
+| HCL (Terraform) | `.tf`, `.tfvars` |
+
+---
+
+## Additional Bundled WASM Grammars
+
+KiroGraph bundles WASM grammars for these languages as well. They are indexed automatically when encountered:
+
+Astro, GDScript, HCL, Julia, Nix, Pascal, Perl, PowerShell, R, SCSS, SQL, Verilog
+
+---
+
+## Framework Detection
+
+KiroGraph automatically detects frameworks during indexing and uses them to enrich the graph with framework-specific semantics: routes, components, lifecycle methods, middleware chains, and more.
+
+### Web Frameworks
+
+**JavaScript / TypeScript:** React, Next.js, React Native, Angular, Svelte, SvelteKit, Express, Fastify, Koa
+
+**Vue:** Vue, Nuxt
+
+**Python:** Django, Flask, FastAPI
+
+**Ruby:** Rails
+
+**Java:** Spring, Spring Boot, Spring MVC
+
+**Scala:** Play, Akka HTTP, http4s
+
+**Go:** Generic Go resolver
+
+**Rust:** Generic Rust resolver
+
+**C#:** ASP.NET Core
+
+**Swift:** SwiftUI, UIKit, Vapor
+
+**PHP:** Laravel
+
+**Elixir:** Phoenix
+
+**Solidity:** Hardhat, Foundry, Truffle (with OpenZeppelin patterns)
+
+### Infrastructure as Code
+
+AWS CDK, SST, Serverless Framework, AWS SAM, Terraform / OpenTofu, Pulumi, CloudFormation, AWS Amplify Gen 2
+
+### Containers & Orchestration
+
+Kubernetes, Helm, Docker Compose
+
+### Configuration Management
+
+Ansible
+
+---
+
+## Overriding Framework Detection
+
+<Tip>
+  If auto-detection misses your framework — for example in a monorepo where the framework manifest is in a non-standard location — set `frameworkHints` in `.kirograph/config.json` to force the correct resolver.
+</Tip>
+
+```json
+{
+  "frameworkHints": ["react", "express"]
+}
+```
+
+Detected frameworks are stored in config and applied on every subsequent index run. The `frameworkHints` array accepts any framework name from the lists above (lowercase, hyphenated where applicable, e.g. `"next.js"`, `"spring-boot"`, `"aws-cdk"`).

@@ -1,0 +1,93 @@
+---
+title: "KiroGraph: Semantic Code Intelligence for AI Agents"
+sidebarTitle: "Introduction"
+description: "KiroGraph builds a local SQLite knowledge graph from your codebase so AI agents like Kiro can look up symbols, trace call graphs, and assess impact in a single MCP tool call."
+---
+
+KiroGraph is a semantic code knowledge graph for [Kiro IDE](https://kiro.dev) — and a growing family of other MCP-capable AI tools. It parses your source code using tree-sitter, extracts every symbol and relationship, and stores the result in a local SQLite database. When Kiro needs to understand your codebase, it queries that graph in a single tool call instead of reading dozens of files one by one.
+
+## Why KiroGraph?
+
+When an AI agent works on a complex task, it typically explores the codebase through file reads, `grep`, and glob searches. Every one of those is a tool call, and tool calls consume context and slow responses down. On a large feature or a tricky bug, a single task can trigger 10–30 such calls before the agent has enough context to act.
+
+KiroGraph collapses that work into one. A single `kirograph_context("fix auth bug")` call returns:
+
+- The symbols most likely relevant to the task
+- Their call graph neighbors and type hierarchy
+- The impact radius — what else would break
+- Linked memory observations from past sessions (if enabled)
+
+The graph is pre-indexed, always up to date, and **100% local**.
+
+<Note>
+  KiroGraph stores everything in `.kirograph/kirograph.db` on your machine. No data leaves your project, no API keys are required, and no external services are contacted during indexing or querying.
+</Note>
+
+## Architecture at a Glance
+
+KiroGraph is built around a core graph layer that is always active, with opt-in modules you enable as your project needs grow.
+
+```
+┌─────────────────────────────────────────┐
+│                  Kiro                   │
+│                                         │
+│  "Fix the auth bug"                     │
+│           │                             │
+│           ▼                             │
+│  kirograph_context("auth bug")          │
+│           │                             │
+└───────────┼─────────────────────────────┘
+            ▼
+┌───────────────────────────────────────────┐
+│         KiroGraph MCP Server              │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐   │
+│  │  search  │ │ callers  │ │ context  │   │
+│  └────┬─────┘ └────┬─────┘ └────┬─────┘   │
+│       └────────────┼────────────┘         │
+│         SQLite Graph DB (.kirograph/)     │
+└───────────────────────────────────────────┘
+```
+
+### Core Graph (always on)
+
+Tree-sitter AST parsing across 33+ languages extracts 26 node kinds — functions, classes, methods, routes, components, and more — plus the edges between them: calls, imports, exports, extends, implements, contains, references. Everything lands in a single SQLite file with no native dependencies required for structural indexing.
+
+### Opt-in Modules
+
+| Module | Config flag | What it adds |
+|---|---|---|
+| **Semantic Search** | `enableEmbeddings: true` | 768-dim vector embeddings via HuggingFace; 9 engine choices |
+| **Architecture** | `enableArchitecture: true` | Package graph, layer detection, coupling metrics |
+| **Security** | `enableSecurity: true` | Reachability-aware CVE scanning, secrets detection, SAST-lite, SBOM/SARIF |
+| **Memory** | `enableMemory: true` | Cross-session observations auto-linked to code symbols |
+| **Watchmen** | `enableWatchmen: true` | Synthesizes memory into workspace briefs and skill files |
+| **Wiki** | `enableWiki: true` | Karpathy-style LLM wiki that compounds knowledge across sessions |
+| **Docs** | `enableDocs: true` | Section-level retrieval from Markdown, MDX, RST, AsciiDoc, OpenAPI |
+| **Data** | `enableData: true` | Query CSV, JSON, Excel, Parquet, and PDF data server-side |
+| **Token Optimization** | `shellCompressionLevel`, `cavemanMode` | 60–90% token savings on shell output and agent prose |
+
+## Platform Support
+
+Full support is for **Kiro IDE**. Experimental auto-detection and integration is available for **34 other MCP-capable tools**, including Cursor, GitHub Copilot, Claude Code, Windsurf, Cline, Codex, Goose, Aider, Replit, and more.
+
+## Requirements
+
+- **Node.js >= 18**
+- Kiro IDE (fully supported) or any other MCP-capable tool (experimental)
+
+## Where to Go Next
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install KiroGraph, run the installer, index your project, and make your first graph query in under five minutes.
+  </Card>
+  <Card title="How It Works" icon="diagram-project" href="/how-it-works">
+    Dive into the indexing pipeline — tree-sitter parsing, the graph model, incremental sync, and how MCP tools query the graph.
+  </Card>
+  <Card title="Integrations" icon="plug" href="/guides/integrations">
+    Set up KiroGraph for Kiro IDE or any of the 34 other supported MCP-capable tools.
+  </Card>
+  <Card title="MCP Tool Reference" icon="book" href="/reference/mcp-overview">
+    Full reference for all MCP tools exposed by the KiroGraph server, organized by module.
+  </Card>
+</CardGroup>

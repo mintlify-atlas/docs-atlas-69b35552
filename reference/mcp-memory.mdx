@@ -1,0 +1,418 @@
+---
+title: "Memory MCP Tools Reference"
+sidebarTitle: "Memory Tools"
+description: "Reference for KiroGraph's 16 memory tools: store decisions, search observations, manage conflicts, review stale facts, and trigger Watchmen workspace synthesis."
+---
+
+KiroGraph's memory subsystem gives AI agents a persistent, queryable store of project observations — decisions made, errors encountered, architectural patterns discovered, and session summaries produced. Unlike conversation history, memory survives across sessions and is stored in the same SQLite database as the code graph, enabling symbol-linked retrieval. All tools in this group require `enableMemory: true`. Watchmen synthesis tools additionally require `enableWatchmen: true`.
+
+<Note>
+  Memory is stored per-project in `.kirograph/memory.db` (or co-located with
+  the main graph database). Observations are optionally embedded for semantic
+  search. If your embedding model changes, run `kirograph mem reembed` to
+  update stale vectors.
+</Note>
+
+---
+
+## Core Memory Tools
+
+### `kirograph_mem_store`
+
+Store an observation in project memory. Duplicate content is silently ignored — re-storing the same text returns the existing ID.
+
+<ParamField body="content" type="string" required>
+  Observation text. Should be factual and specific.
+</ParamField>
+
+<ParamField body="kind" type="string" default="note">
+  Observation kind. Options: `decision`, `error`, `pattern`, `architecture`, `summary`, `note`.
+</ParamField>
+
+<ParamField body="topicKey" type="string">
+  Stable semantic key for this observation (e.g. `"architecture/auth-model"`). Enables addressing by concept across sessions.
+</ParamField>
+
+<ParamField body="reviewAfter" type="number">
+  Epoch millisecond timestamp after which this observation should be reviewed. Observations past this date appear in `kirograph_mem_review`.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+**Normal response:**
+
+```json
+{ "id": "obs_abc123" }
+```
+
+**Watchmen response** (when `enableWatchmen: true` and the synthesis threshold is met):
+
+When enough observations have accumulated since the last `kind: 'summary'`, the response includes additional fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | The observation ID as usual |
+| `watchmenReady` | `true` | Present only when synthesis should run |
+| `pendingCount` | number | Observations since last `kind: 'summary'` |
+| `message` | string | Synthesis instructions for the agent |
+| `targetFiles` | string[] | Project-relative paths to write the workspace brief to |
+| `skillTargetDir` | string? | Present only when Kiro is detected (`.kiro/` exists). Path for individual `watchmen-<slug>.md` skill files. |
+
+On receiving `watchmenReady: true`, the agent should: (1) call `kirograph_mem_search` for each kind, (2) write the workspace brief to each file in `targetFiles`, (3) if `skillTargetDir` is present write separate skill files for recurring procedures, otherwise embed a `## Recurring Procedures` section in the brief, (4) store a `kind: 'summary'` observation to reset the counter.
+
+---
+
+### `kirograph_mem_search`
+
+Search project memory for past decisions, errors, patterns, and context. Results are ranked by semantic similarity if embeddings are enabled, otherwise by FTS score.
+
+<ParamField body="query" type="string" required>
+  Natural language search query.
+</ParamField>
+
+<ParamField body="kind" type="string">
+  Filter by observation kind. Options: `decision`, `error`, `pattern`, `architecture`, `summary`, `note`.
+</ParamField>
+
+<ParamField body="limit" type="number" default="10">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="sessionId" type="string">
+  Filter observations to a specific session.
+</ParamField>
+
+<ParamField body="asOf" type="number">
+  Query facts valid at this timestamp (epoch ms). Filters out expired or superseded observations.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+```json
+{
+  "tool": "kirograph_mem_search",
+  "arguments": {
+    "query": "authentication architecture decisions",
+    "kind": "decision",
+    "limit": 5
+  }
+}
+```
+
+---
+
+### `kirograph_mem_timeline`
+
+List recent sessions and their observations chronologically. Useful for reconstructing what happened in previous agent sessions.
+
+<ParamField body="limit" type="number" default="5">
+  Number of sessions to show.
+</ParamField>
+
+<ParamField body="sessionId" type="string">
+  Show observations for a specific session only.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_status`
+
+Memory subsystem health check. Returns session count, total observations, embedding coverage, model mismatch detection, relation count, and pending conflicts.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_capture`
+
+Extract and store structured learnings from a freeform text block. Looks for `## Key Learnings`, `## Observations`, `## Decisions`, and `## Key Changes` sections and saves each bullet point as a separate typed observation. Pure structural parser — no LLM required.
+
+<ParamField body="content" type="string" required>
+  Text block containing structured sections with bullet-point observations.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_save_prompt`
+
+Save the current user prompt to session memory for context reconstruction in future sessions.
+
+<ParamField body="content" type="string" required>
+  Prompt content to save.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Review and Maintenance Tools
+
+### `kirograph_mem_review`
+
+List observations past their `review_after` date — stale facts the agent should re-evaluate, update, or supersede. Reports how many days overdue each observation is.
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_mark_reviewed`
+
+Mark an observation as reviewed. Clears its `review_after` date, removing it from the review queue returned by `kirograph_mem_review`.
+
+<ParamField body="id" type="string" required>
+  Observation ID to mark as reviewed.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_prune`
+
+Remove memory observations older than a given duration. Use periodically to keep the memory store lean and reduce embedding overhead.
+
+<ParamField body="olderThan" type="string" default="90d">
+  Duration threshold. Accepts `h` (hours), `d` (days), `w` (weeks), `m` (months) — e.g. `"30d"`, `"6m"`, `"2w"`.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_lint`
+
+Memory health check: stale symbol links, model mismatch detection, and orphaned sessions. Optionally auto-removes stale links.
+
+<ParamField body="fix" type="boolean" default="false">
+  When `true`, automatically remove stale symbol links.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_suggest_topic_key`
+
+Suggest a stable `topic_key` for an observation based on its kind and content. Returns a deterministic slug like `"architecture/auth-model"` that can be used to address the observation by concept rather than by ID.
+
+<ParamField body="kind" type="string" required>
+  Observation kind. Options: `decision`, `error`, `pattern`, `architecture`, `summary`, `note`.
+</ParamField>
+
+<ParamField body="title" type="string" required>
+  Short title or first sentence of the observation.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Conflict Management Tools
+
+Memory relations let the agent model how observations relate to one another — when a new decision supersedes an old one, when two observations conflict, or when they are compatible. The workflow is: **scan** → **compare** → **judge** (or **ignore**).
+
+### `kirograph_mem_conflicts_scan`
+
+Scan recent observations for potential conflicts using FTS similarity. Returns candidate pairs that may need a relation established via `kirograph_mem_compare`.
+
+<ParamField body="limit" type="number" default="50">
+  Maximum observations to scan.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_compare`
+
+Establish a typed relation between two observations. Accepts observation IDs or `topic_key` values. Creates a `pending` relation for agent review via `kirograph_mem_judge`.
+
+<ParamField body="observationA" type="string" required>
+  First observation ID or `topic_key`.
+</ParamField>
+
+<ParamField body="observationB" type="string" required>
+  Second observation ID or `topic_key`.
+</ParamField>
+
+<ParamField body="relation" type="string" required>
+  Relation type. Options: `supersedes`, `conflicts_with`, `compatible`, `scoped`, `related`, `not_conflict`.
+</ParamField>
+
+<ParamField body="confidence" type="number" default="1.0">
+  Confidence score from 0.0 to 1.0.
+</ParamField>
+
+<ParamField body="reason" type="string">
+  Explanation for the relation.
+</ParamField>
+
+<ParamField body="evidence" type="string">
+  Supporting evidence text.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_conflicts_list`
+
+List pending conflict relations that need resolution. Each entry shows the relation ID, relation type, the two observation IDs involved, and the reason if provided.
+
+<ParamField body="limit" type="number" default="20">
+  Maximum results to return.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_judge`
+
+Finalize a pending conflict relation — confirm, revise, or reclassify it. Changes the `judgment_status` from `pending` to `judged`.
+
+<ParamField body="relationId" type="string" required>
+  Relation ID from `kirograph_mem_compare` or `kirograph_mem_conflicts_list`.
+</ParamField>
+
+<ParamField body="relation" type="string" required>
+  Final relation type after judgment.
+</ParamField>
+
+<ParamField body="confidence" type="number" required>
+  Final confidence score (0.0–1.0).
+</ParamField>
+
+<ParamField body="reason" type="string">
+  Reasoning for the judgment.
+</ParamField>
+
+<ParamField body="evidence" type="string">
+  Supporting evidence text.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_mem_conflicts_ignore`
+
+Dismiss a pending conflict relation as not relevant. The relation is marked ignored and will no longer appear in `kirograph_mem_conflicts_list`.
+
+<ParamField body="relationId" type="string" required>
+  Relation ID to dismiss (from `kirograph_mem_conflicts_list`).
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Watchmen Tools (require `enableMemory: true` + `enableWatchmen: true`)
+
+Watchmen monitors observation accumulation and prompts the agent to synthesize a workspace brief when a threshold is reached. The brief is written to configured target files (e.g. `.kiro/steering/workspace.md`) and individual skill files for recurring procedures.
+
+### `kirograph_watchmen_status`
+
+Show Watchmen status: pending observation count since last synthesis, the synthesis threshold, and which brief files would be written on next synthesis.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_watchmen_synthesize`
+
+Run Watchmen synthesis immediately using the local model (requires `watchmenSynthesisMode: "local"` in config). Processes pending observations into a workspace brief without waiting for the threshold to be reached.
+
+<ParamField body="force" type="boolean" default="false">
+  Run even if the pending observation count is below the threshold.
+</ParamField>
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+### `kirograph_watchmen_reset`
+
+Reset the Watchmen synthesis counter by storing a `kind: 'summary'` observation, without running full synthesis. Use when you want to reset the counter after manually writing the workspace brief.
+
+<ParamField body="projectPath" type="string" default="cwd">
+  Project root path.
+</ParamField>
+
+---
+
+## Typical Memory Workflow
+
+<Steps>
+  <Step title="Store observations throughout a session">
+    Call `kirograph_mem_store` with appropriate `kind` values as you make decisions, encounter errors, or discover patterns.
+  </Step>
+  <Step title="Search at the start of related tasks">
+    Call `kirograph_mem_search` at the beginning of a new session or task to surface relevant past observations before reading code.
+  </Step>
+  <Step title="Scan and resolve conflicts periodically">
+    Run `kirograph_mem_conflicts_scan` periodically. For each candidate pair, call `kirograph_mem_compare` then `kirograph_mem_judge` to establish the correct relation.
+  </Step>
+  <Step title="Review stale facts">
+    Run `kirograph_mem_review` to find observations past their `review_after` date. Update, supersede, or mark them reviewed.
+  </Step>
+  <Step title="Synthesize when Watchmen fires">
+    When `kirograph_mem_store` returns `watchmenReady: true`, search memory for each kind, write the workspace brief, and store a `kind: 'summary'` to reset the counter.
+  </Step>
+</Steps>
+
+```json
+{
+  "tool": "kirograph_mem_store",
+  "arguments": {
+    "content": "Decided to use Redis for session storage instead of JWT cookies — supports revocation and multi-device logout.",
+    "kind": "decision",
+    "topicKey": "architecture/session-storage",
+    "reviewAfter": 1767225600000
+  }
+}
+```
